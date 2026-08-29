@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>المنصة الالكترونية</title>
+    <!-- خط Tajawal العربي -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <!-- مكتبة Tailwind CSS للتجاوب السريع -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- مكتبة FontAwesome للأيقونات -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <!-- التنسيقات المخصصة -->
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body
+    class="bg-slate-50 text-slate-800 font-['Tajawal'] min-h-screen flex flex-col antialiased"
+  >
+    <!-- ================= 1. الهيدر الرئيسي الرسمي ================= -->
+    <header
+      class="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-30"
+    >
+      <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-20 items-center">
+          <!-- زر القائمة للجوال + الشعارين والعنوان المعتمد -->
+          <div class="flex items-center space-x-3 space-x-reverse">
+            <!-- زر 3 شرطات للجوال (يظهر فقط بعد تسجيل الدخول) -->
+            <button
+              id="mobile-menu-btn"
+              onclick="toggleMobileSidebar()"
+              class="hidden p-2 text-[#2B1736] hover:bg-slate-100 rounded-xl focus:outline-none"
+              title="القائمة الرئيسية"
+            >
+              <i class="fa-solid fa-bars text-xl"></i>
+            </button>
+
+            <div
+              class="flex items-center space-x-2.5 space-x-reverse cursor-pointer"
+              onclick="navigateTo('portal')"
+            >
+              <!-- شعار مركز مشكاة التعليمي -->
+              <img
+                src="logo15.png"
+                alt="مركز مشكاة"
+                class="h-10 sm:h-12 w-auto object-contain"
+                onerror="this.style.display = 'none'"
+              />
+
+              <!-- فاصل رأسي -->
+              <div class="h-8 w-px bg-slate-200 mx-0.5"></div>
+
+              <!-- شعار مؤسسة توطين العلم -->
+              <img
+                src="logo16.png"
+                alt="توطين العلم"
+                class="h-11 sm:h-13 w-auto object-contain"
+                onerror="this.style.display = 'none'"
+              />
+
+              <div class="mr-2">
+                <h1
+                  class="text-base sm:text-lg font-black text-[#0B2533] leading-tight"
+                >
+                  المنصة الالكترونية
+                </h1>
+              </div>
+            </div>
+          </div>
+
+          <!-- مسار التنبيهات والبروفايل ومحدد الدور -->
+          <div
+            id="header-user-controls"
+            class="flex items-center space-x-3 sm:space-x-4 space-x-reverse"
+          >
+            <!-- زر الانتقال بين المسارات (يظهر بعد تسجيل الدخول فقط) -->
+            <button
+              id="header-portal-btn"
+              onclick="navigateTo('portal')"
+              class="hidden sm:flex items-center space-x-1.5 space-x-reverse px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-[#169BA2] hover:text-white text-xs font-bold text-slate-700 transition"
+            >
+              <i class="fa-solid fa-layer-group text-xs"></i>
+              <span>تبديل المسار</span>
+            </button>
+
+            <!-- مركز التنبيهات (يظهر حصرياً لحساب المدير بعد تسجيل الدخول) -->
+            <div id="notif-container" class="relative hidden">
+              <button
+                id="notif-btn"
+                onclick="toggleNotificationsModal()"
+                class="relative p-2 text-slate-600 hover:text-[#169BA2] hover:bg-slate-100 rounded-full transition"
+                title="التنبيهات والإشعارات"
+              >
+                <i class="fa-regular fa-bell text-xl"></i>
+                <span
+                  id="notif-badge"
+                  class="absolute top-1 right-1 bg-[#9E1B48] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border-2 border-white"
+                  >2</span
+                >
+              </button>
+            </div>
+
+            <!-- بطاقة المستخدم الحالي وزر تسجيل الخروج -->
+            <div
+              id="header-user-badge"
+              class="hidden items-center border-r pr-3 sm:pr-4 border-slate-200"
+            >
+              <div
+                class="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#169BA2]/10 text-[#169BA2] font-black flex items-center justify-center ml-2 sm:ml-3 border-2 border-[#169BA2]/40 transition-all duration-300 text-xs sm:text-sm"
+                id="header-avatar"
+              >
+                إد
+              </div>
+              <div class="hidden sm:block">
+                <div
+                  class="text-xs sm:text-sm font-bold text-[#0B2533]"
+                  id="header-user-name"
+                >
+                  إدارة المنصة
+                </div>
+                <div class="text-[11px] text-slate-500" id="header-user-role">
+                  صلاحيات كاملة
+                </div>
+              </div>
+              <button
+                onclick="logoutUser()"
+                class="mr-3 p-2 text-slate-400 hover:text-rose-600 rounded-xl transition"
+                title="تسجيل الخروج"
+              >
+                <i class="fa-solid fa-arrow-right-from-bracket text-base"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- خلفية تعتيم للشاشات الصغيرة عند فتح القائمة الجانبية -->
+    <div
+      id="sidebar-backdrop"
+      onclick="toggleMobileSidebar()"
+      class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 md:hidden transition-opacity"
+    ></div>
+
+    <!-- ================= 2. الحاوية الرئيسية للتطبيق ================= -->
+    <div
+      class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 flex flex-col md:flex-row gap-5"
+    >
+      <!-- القائمة الجانبية (مخفية قبل تسجيل الدخول وتظهر بعدها مباشرة) -->
+      <aside
+        id="main-sidebar"
+        class="hidden md:hidden fixed md:static top-0 right-0 h-full md:h-fit w-72 md:w-64 bg-white md:rounded-3xl border-l md:border border-slate-200 shadow-2xl md:shadow-sm p-4 shrink-0 z-50 md:z-auto transform translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out overflow-y-auto"
+      >
+        <div
+          class="flex justify-between items-center mb-4 md:hidden pb-3 border-b border-slate-100"
+        >
+          <span class="font-black text-[#0B2533] text-sm"
+            >القائمة الرئيسية</span
+          >
+          <button
+            onclick="toggleMobileSidebar()"
+            class="p-1.5 text-slate-400 hover:text-slate-700"
+          >
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+        <nav id="sidebar-nav" class="space-y-1">
+          <!-- توليد الروابط والقوائم ديناميكياً بعد تسجيل الدخول -->
+        </nav>
+      </aside>
+
+      <!-- منطقة المحتوى المتغير -->
+      <main id="app-content" class="flex-1 min-w-0">
+        <div class="flex justify-center items-center h-64 text-slate-400">
+          <i
+            class="fa-solid fa-circle-notch fa-spin text-3xl text-[#169BA2]"
+          ></i>
+          <span class="mr-3 font-semibold">جاري تحميل المنصة...</span>
+        </div>
+      </main>
+    </div>
+
+    <!-- ================= 3. المودال العام للإشعارات ================= -->
+    <div
+      id="notifications-modal"
+      class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-start pt-20 px-4"
+    >
+      <div
+        class="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full overflow-hidden animate-in fade-in duration-150"
+      >
+        <div
+          class="bg-[#0B2533] text-white px-6 py-4 flex justify-between items-center border-b border-[#D4A359]"
+        >
+          <h3 class="font-bold text-base flex items-center">
+            <i class="fa-solid fa-bell text-[#D4A359] ml-2"></i> مركز الإشعارات
+            والتنبيهات
+          </h3>
+          <button
+            onclick="toggleNotificationsModal()"
+            class="text-slate-300 hover:text-white"
+          >
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+        <div
+          id="notifications-list"
+          class="p-4 max-h-[60vh] overflow-y-auto divide-y divide-slate-100"
+        ></div>
+        <div
+          class="bg-slate-50 px-6 py-3 border-t border-slate-100 text-center"
+        >
+          <button
+            onclick="markAllNotificationsRead()"
+            class="text-xs text-[#169BA2] font-bold hover:underline"
+          >
+            تحديد الكل كمقروء
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 4. الفوتر ================= -->
+    <footer
+      class="bg-white border-t border-slate-200 mt-auto py-5 text-xs text-slate-500"
+    >
+      <div
+        class="max-w-7xl mx-auto px-4 flex items-center justify-center sm:justify-start"
+      >
+        <div class="flex items-center space-x-3 space-x-reverse">
+          <img
+            src="logo15.png"
+            alt="مركز مشكاة"
+            class="h-7 w-auto object-contain opacity-85"
+            onerror="this.style.display = 'none'"
+          />
+          <div class="h-5 w-px bg-slate-200"></div>
+          <img
+            src="logo16.png"
+            alt="توطين العلم"
+            class="h-8 w-auto object-contain opacity-85"
+            onerror="this.style.display = 'none'"
+          />
+        </div>
+      </div>
+    </footer>
+
+    <!-- ربط الملفات البرمجية بالترتيب الصحيح -->
+    <script src="data.js"></script>
+    <script src="views.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
