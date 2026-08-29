@@ -1,644 +1,974 @@
 /**
- * data.js - قاعدة البيانات وتهيئة الربط السحابي مع Firebase Firestore
- * المشروع: toti-ae62c
+ * app.js - محرك المنصة الرئيسي وإدارة العمليات الشاملة
+ * يدعم: إظهار التنبيهات للجميع فور تسجيل الدخول، توحيد مسمى (برنامج)،
+ * إظهار القائمة الجانبية بالكامل، استيراد Excel، والتحضير الجماعي التلقائي.
  */
 
-// تهيئة إعدادات Firebase الخاصة بمشروعك
-const firebaseConfig = {
-  apiKey: "AIzaSyDR4KcHKSIxRGzrFmkJ536j9pPGLzo18-k",
-  authDomain: "toti-ae62c.firebaseapp.com",
-  projectId: "toti-ae62c",
-  storageBucket: "toti-ae62c.firebasestorage.app",
-  messagingSenderId: "42863617740",
-  appId: "1:42863617740:web:e1ad90b5b8ab752c84c469",
-  measurementId: "G-YYVRCKPMQR",
+const state = {
+  currentUser: null,
+  currentRole: null,
+  currentView: "portal",
+  currentWeekOffset: 0,
+  currentProgramId: "prog_taseel",
+  scheduleViewMode: "stacked",
 };
 
-// تشغيل Firebase وربط Firestore
-if (typeof firebase !== "undefined" && !firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-  window.dbFirestore = firebase.firestore();
+// 1. التهيئة للبدء في شاشة البوابة
+function initApp() {
+  if (!window.db || !window.db.users) {
+    setTimeout(initApp, 50);
+    return;
+  }
+  hideAppControls();
+  navigateTo("portal");
 }
 
-window.db = {
-  // 1. قائمة المعايير والمهام الـ 29 المعتمدة كقوالب جاهزة للتكليف[cite: 18]
-  taskTemplates: [
-    "أن يقوم مسؤول شؤون الطلاب بنفسه بالتحضير الأسبوعي",
-    "أن يتضمن التحضير الأسبوعي فرز لنوع الغياب (بعذر / بدون عذر)",
-    "إبلاغ مشرفي الحلقات والمجمعات القرآنية بانضباط طلابهم بالحضور الأسبوعي",
-    "أن تتواصل إدارة البرنامج مع الطلاب المتغيبين بدون عذر",
-    "أن يسلم الشرح قبل أول يوم من أيام الدرس الأسبوعي",
-    "أن يسلم للطلاب جدول قراءة الشرح قبل 5 أيام من بداية الدرس الأسبوعي",
-    "أن يذكر الطلاب بقراءة المقدار الأسبوعي للمتن في المجموعة الطلابية قبل الدرس",
-    "أن يذكر الطلاب بقراءة المقدار الأسبوعي للشرح في المجموعة الطلابية بعد الدرس",
-    "أن يرصد إنجاز الطلاب في القراءة القبلية للمتن والشرح",
-    "أن تعد إدارة البرنامج السؤال الأسبوعي ويكون متعلق بما تم شرحه في هذا الأسبوع",
-    "أن يكرم في كل أسبوع الفائز بالسؤال الأسبوعي",
-    "أن يكرم المتميزين في أداء القراءة وعدم الغياب بعد آخر درس مباشرة",
-    "أن يتم تنفيذ ساعات المقرر وفق الخطة العلمية",
-    "أن يتم التنسيق مع ملقي مناسب قبل بداية الدرس الأسبوعي بمدة لا تقل عن أسبوع",
-    "أن يصل توصيف المقرر للملقي",
-    "أن يصل تقسيم المقرر للملقي",
-    "أن يتابع الملقي أسبوعياً في إنجاز المقرر الأسبوعي المحدد",
-    "استخدام الملقي للأدوات التعليمية المساندة وتفعيله لها أثناء الإلقاء",
-    "أن يتم تقييم الملقي بعد انتهاء الدرس الأسبوعي",
-    "أن يتم رصد مدى رضا الملقي عن الدرس الأسبوعي",
-    "أن يكون الحد الأعلى لوقت الدرس 90 دقيقة والحد الأدنى 60 دقيقة",
-    "أن يكون الدرس الأسبوعي حضورياً بنسبة 80% ولا يصار إلى تنفيذه عن بعد إلا عند الظروف الاستثنائية",
-    "أن تكون أسئلة الاختبار متنوعة بين المقالي والموضوعي على أن تكون نسبة الأسئلة المقالية 30% من الاختبار",
-    "أن يقام اختبار الدرس الأسبوعي حضورياً",
-    "أن يقام الاختبار النهائي بعد آخر درس بمدة لا تقل عن 4 أيام ولا تزيد عن 7 أيام",
-    "أن يتم إجراء اختبار بديل للمتغيبين والراسبين بعد الاختبار الأساسي للدرس الأسبوعي",
-    "أن يبلغ الطلاب ومشرفي الحلقات بدرجات الاختبار",
-    "أن يكون مكان الدرس الأسبوعي مهيئاً بالأدوات التعليمية المساندة (سبورة - شاشة - سماعات - بروجكتر)",
-    "أن يتم رصد مدى رضا الطلاب عن الدرس الأسبوعي",
-  ],
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
 
-  // 2. برامج المنصة الأساسية (بدون ال التعريف)[cite: 18]
-  programs: [
-    {
-      id: "prog_taheel",
-      name: "تأهيل",
-      color: "#169BA2",
-      levelsCount: 2,
-    },
-    {
-      id: "prog_taseel",
-      name: "تأصيل",
-      color: "#0B2533",
-      levelsCount: 3,
-    },
-    {
-      id: "prog_rasookh",
-      name: "رسوخ",
-      color: "#D4A359",
-      levelsCount: 2,
-    },
-  ],
+// 2. إخفاء وإظهار عناصر التحكم والقائمة الجانبية
+function hideAppControls() {
+  const sidebar = document.getElementById("main-sidebar");
+  const userControls = document.getElementById("header-user-badge");
+  const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+  const notifContainer = document.getElementById("notif-container");
 
-  // 3. مستويات البرامج[cite: 18]
-  levels: [
-    {
-      id: "lvl_th_1",
-      programId: "prog_taheel",
-      name: "المستوى الأول - تأسيس",
-      order: 1,
-    },
-    {
-      id: "lvl_th_2",
-      programId: "prog_taheel",
-      name: "المستوى الثاني - تمكين",
-      order: 2,
-    },
-    {
-      id: "lvl_ts_1",
-      programId: "prog_taseel",
-      name: "المستوى الأول - أصول وتمهيد",
-      order: 1,
-    },
-    {
-      id: "lvl_ts_2",
-      programId: "prog_taseel",
-      name: "المستوى الثاني - تأصيل وتعميق",
-      order: 2,
-    },
-    {
-      id: "lvl_ts_3",
-      programId: "prog_taseel",
-      name: "المستوى الثالث - إتقان وبحث",
-      order: 3,
-    },
-    {
-      id: "lvl_rs_1",
-      programId: "prog_rasookh",
-      name: "المستوى المتقدم الأول",
-      order: 1,
-    },
-    {
-      id: "lvl_rs_2",
-      programId: "prog_rasookh",
-      name: "المستوى المتقدم الثاني",
-      order: 2,
-    },
-  ],
+  if (sidebar) {
+    sidebar.classList.add("hidden");
+    sidebar.classList.remove("md:block");
+  }
+  if (userControls) userControls.classList.add("hidden");
+  if (mobileMenuBtn) mobileMenuBtn.classList.add("hidden");
+  if (notifContainer) notifContainer.classList.add("hidden");
+}
 
-  // 4. المجموعات الدراسية[cite: 18]
-  groups: [
-    {
-      id: "grp_ts_101",
-      levelId: "lvl_ts_1",
-      programId: "prog_taseel",
-      name: "مجموعة الخليل بن أحمد",
-      supervisorId: "supervisor_1",
-    },
-    {
-      id: "grp_rs_201",
-      levelId: "lvl_rs_1",
-      programId: "prog_rasookh",
-      name: "مجموعة الشاطبي المتقدمة",
-      supervisorId: "supervisor_1",
-    },
-    {
-      id: "grp_th_001",
-      levelId: "lvl_th_1",
-      programId: "prog_taheel",
-      name: "مجموعة البخاري التأسيسية",
-      supervisorId: "supervisor_2",
-    },
-    {
-      id: "grp_ts_102",
-      levelId: "lvl_ts_1",
-      programId: "prog_taseel",
-      name: "مجموعة سيبويه التأصيلية",
-      supervisorId: "supervisor_3",
-    },
-  ],
+function showAppControls(user) {
+  const sidebar = document.getElementById("main-sidebar");
+  const userControls = document.getElementById("header-user-badge");
+  const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+  const notifContainer = document.getElementById("notif-container");
 
-  // 5. المستخدمين والحسابات[cite: 18]
-  users: [
-    {
-      id: "admin",
-      name: "إدارة المنصة المركزية",
-      role: "admin",
-      phone: "0500000000",
-      password: "1234",
-      email: "admin@alelm.edu.sa",
-      avatar: "إد",
-      color: "#0B2533",
-      isRestricted: false,
-    },
-    {
-      id: "supervisor_1",
-      name: "أ. أحمد الميموني",
-      role: "supervisor",
-      phone: "0551112233",
-      password: "1234",
-      email: "ahmed@alelm.edu.sa",
-      avatar: "أح",
-      color: "#169BA2",
-      assignedPrograms: ["prog_taseel", "prog_rasookh"],
-      assignedGroups: ["grp_ts_101", "grp_rs_201"],
-      isRestricted: false,
-    },
-    {
-      id: "supervisor_2",
-      name: "أ. فيصل السعيد",
-      role: "supervisor",
-      phone: "0554445566",
-      password: "1234",
-      email: "faisal@alelm.edu.sa",
-      avatar: "في",
-      color: "#E59824",
-      assignedPrograms: ["prog_taheel"],
-      assignedGroups: ["grp_th_001"],
-      isRestricted: false,
-    },
-    {
-      id: "supervisor_3",
-      name: "أ. سعد الغامدي",
-      role: "supervisor",
-      phone: "0557778899",
-      password: "1234",
-      email: "saad@alelm.edu.sa",
-      avatar: "سع",
-      color: "#8AA838",
-      assignedPrograms: ["prog_taseel"],
-      assignedGroups: ["grp_ts_102"],
-      isRestricted: false,
-    },
-    {
-      id: "student_1",
-      name: "عبد الله العتيبي",
-      role: "student",
-      studentNumber: "STU-2026-001",
-      phone: "0550011223",
-      fatherPhone: "0500011223",
-      password: "1234",
-      email: "abdullah@gmail.com",
-      avatar: "عب",
-      currentProgramId: "prog_taseel",
-      currentLevelId: "lvl_ts_1",
-      groupId: "grp_ts_101",
-      supervisorId: "supervisor_1",
-      progress: 78,
-      isRestricted: false,
-    },
-    {
-      id: "student_2",
-      name: "محمد الشهري",
-      role: "student",
-      studentNumber: "STU-2026-002",
-      phone: "0553344556",
-      fatherPhone: "0503344556",
-      password: "1234",
-      email: "m.shehri@gmail.com",
-      avatar: "مح",
-      currentProgramId: "prog_taseel",
-      currentLevelId: "lvl_ts_1",
-      groupId: "grp_ts_101",
-      supervisorId: "supervisor_1",
-      progress: 45,
-      isRestricted: false,
-    },
-    {
-      id: "student_3",
-      name: "خالد الغامدي",
-      role: "student",
-      studentNumber: "STU-2026-003",
-      phone: "0556677889",
-      fatherPhone: "0506677889",
-      password: "1234",
-      email: "khaled@gmail.com",
-      avatar: "خا",
-      currentProgramId: "prog_rasookh",
-      currentLevelId: "lvl_rs_1",
-      groupId: "grp_rs_201",
-      supervisorId: "supervisor_1",
-      progress: 92,
-      isRestricted: false,
-    },
-  ],
+  // إظهار القائمة الجانبية بالكامل على سطح المكتب وتفعيلها للجوال
+  if (sidebar) {
+    sidebar.classList.remove("hidden");
+    sidebar.classList.remove("md:hidden");
+    sidebar.classList.add("md:block");
+  }
+  if (userControls) {
+    userControls.classList.remove("hidden");
+    userControls.classList.add("flex");
+  }
+  if (mobileMenuBtn) {
+    mobileMenuBtn.classList.remove("hidden");
+  }
 
-  // 6. طلبات التسجيل الجديدة[cite: 18]
-  registrationRequests: [
-    {
-      id: "req_101",
-      name: "ياسر القحطاني",
-      phone: "0558899001",
-      fatherPhone: "0508899001",
-      programId: "prog_taseel",
-      requestDate: "2026-08-28",
-      status: "قيد المراجعة",
-    },
-    {
-      id: "req_102",
-      name: "بدر عسيري",
-      phone: "0552233445",
-      fatherPhone: "0502233445",
-      programId: "prog_taheel",
-      requestDate: "2026-08-29",
-      status: "قيد المراجعة",
-    },
-  ],
+  // إظهار مركز التنبيهات لجميع المستخدمين فور تسجيل الدخول
+  if (notifContainer) {
+    notifContainer.classList.remove("hidden");
+  }
 
-  // 7. طلبات تعديل البيانات المقدمة للاعتماد[cite: 18]
-  pendingProfileEdits: [
-    {
-      id: "edit_101",
-      studentId: "student_1",
-      studentName: "عبد الله العتيبي",
-      newPhone: "0550099887",
-      newFatherPhone: "0500099887",
-      newEmail: "abdullah.new@gmail.com",
-      requestDate: "2026-08-29",
+  const nameEl = document.getElementById("header-user-name");
+  const roleEl = document.getElementById("header-user-role");
+  const avatarEl = document.getElementById("header-avatar");
+
+  if (nameEl) nameEl.innerText = user.name;
+  if (roleEl) {
+    roleEl.innerText =
+      user.role === "admin"
+        ? "إدارة كاملة لكل البرامج"
+        : user.role === "supervisor"
+          ? "مشرف معتمد"
+          : "طالب مسجل";
+  }
+  if (avatarEl) {
+    avatarEl.innerText = user.avatar;
+  }
+
+  if (window.views && typeof window.views.renderSidebar === "function") {
+    window.views.renderSidebar(user.role);
+  }
+}
+
+// 3. التحقق وتسجيل الدخول
+function handleLoginSubmit(programId) {
+  const userSelect = document.getElementById("login-user-select").value;
+  const phoneInput = document.getElementById("login-phone").value.trim();
+  const passInput = document.getElementById("login-pass").value.trim();
+
+  let user = null;
+  if (userSelect) {
+    user = db.users.find((u) => u.id === userSelect);
+  } else {
+    user = db.users.find((u) => u.phone === phoneInput);
+  }
+
+  if (!user) {
+    alert("بيانات الدخول غير صحيحة، يرجى التأكد من رقم الجوال أو اختيار حساب.");
+    return;
+  }
+
+  if (user.password && user.password !== passInput) {
+    alert("كلمة المرور غير صحيحة!");
+    return;
+  }
+
+  if (user.isRestricted) {
+    alert("عذراً، هذا الحساب مقيد حالياً. يرجى التواصل مع إدارة المنصة.");
+    return;
+  }
+
+  state.currentUser = user;
+  state.currentRole = user.role;
+  state.currentProgramId = programId;
+
+  if (user.role === "student") {
+    user.currentProgramId = programId;
+  }
+
+  closeModal("login-modal");
+  showAppControls(user);
+  updateNotificationsBadge();
+  navigateTo("home");
+}
+
+function logoutUser() {
+  state.currentUser = null;
+  state.currentRole = null;
+  hideAppControls();
+  navigateTo("portal");
+}
+
+// 4. اختيار البرنامج والدخول
+function selectProgramPath(progId) {
+  state.currentProgramId = progId;
+  if (!state.currentUser) {
+    views.openLoginModal(progId);
+  } else {
+    if (state.currentUser.role === "student") {
+      state.currentUser.currentProgramId = progId;
+    }
+    navigateTo("schedule");
+  }
+}
+
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById("main-sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (!sidebar || !backdrop) return;
+
+  const isOpen = sidebar.classList.contains("sidebar-open");
+  if (isOpen) {
+    sidebar.classList.remove("sidebar-open");
+    backdrop.classList.add("hidden");
+  } else {
+    sidebar.classList.add("sidebar-open");
+    backdrop.classList.remove("hidden");
+  }
+}
+
+function toggleScheduleViewMode(mode) {
+  state.scheduleViewMode = mode;
+  navigateTo("schedule");
+}
+
+// 5. محرك التنقل بين الشاشات
+function navigateTo(viewName) {
+  state.currentView = viewName;
+
+  const sidebar = document.getElementById("main-sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (sidebar && sidebar.classList.contains("sidebar-open")) {
+    sidebar.classList.remove("sidebar-open");
+    if (backdrop) backdrop.classList.add("hidden");
+  }
+
+  document.querySelectorAll("#sidebar-nav button").forEach((btn) => {
+    btn.classList.remove("nav-item-active");
+  });
+  const activeBtn = document.getElementById(`nav-${viewName}`);
+  if (activeBtn) activeBtn.classList.add("nav-item-active");
+
+  const contentArea = document.getElementById("app-content");
+  if (!contentArea || !window.views) return;
+
+  switch (viewName) {
+    case "portal":
+      contentArea.innerHTML = window.views.renderPortalView();
+      break;
+    case "home":
+      contentArea.innerHTML = state.currentUser
+        ? window.views.renderHome(state.currentUser)
+        : window.views.renderPortalView();
+      break;
+    case "schedule":
+      contentArea.innerHTML = window.views.renderScheduleWidget(
+        state.currentProgramId,
+        state.currentWeekOffset,
+        state.scheduleViewMode,
+      );
+      break;
+    case "tasks":
+      contentArea.innerHTML = window.views.renderTasksView(state.currentUser);
+      break;
+    case "attendance":
+      contentArea.innerHTML = window.views.renderAttendanceManagementView
+        ? window.views.renderAttendanceManagementView()
+        : window.views.renderHome(state.currentUser);
+      break;
+    case "students":
+      contentArea.innerHTML = window.views.renderAdminStudentsView
+        ? window.views.renderAdminStudentsView()
+        : window.views.renderHome(state.currentUser);
+      break;
+    case "supervisors":
+      contentArea.innerHTML = window.views.renderAdminSupervisorsView
+        ? window.views.renderAdminSupervisorsView()
+        : window.views.renderHome(state.currentUser);
+      break;
+    case "announcements":
+      contentArea.innerHTML = window.views.renderAnnouncementsView
+        ? window.views.renderAnnouncementsView()
+        : window.views.renderHome(state.currentUser);
+      break;
+    case "settings":
+      contentArea.innerHTML = window.views.renderSettingsView
+        ? window.views.renderSettingsView()
+        : window.views.renderHome(state.currentUser);
+      break;
+    default:
+      contentArea.innerHTML = window.views.renderPortalView();
+      break;
+  }
+}
+
+// 6. استيراد الطلاب والمشرفين عبر Excel / CSV
+function handleStudentExcelImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    const text = e.target.result;
+    const lines = text.split("\n").filter((l) => l.trim() !== "");
+    let count = 0;
+
+    lines.forEach((line, idx) => {
+      if (idx === 0 && line.includes("اسم")) return;
+      const parts = line.split(",").map((p) => p.trim());
+      if (parts.length >= 2) {
+        const name = parts[0];
+        const phone = parts[1] || `0550000${Date.now().toString().slice(-3)}`;
+        const fatherPhone = parts[2] || phone;
+        const progName = parts[3] || "تأصيل";
+        const prog =
+          db.programs.find((p) => p.name.includes(progName)) || db.programs[1];
+
+        const newStudent = {
+          id: `student_${Date.now()}_${count}`,
+          name: name,
+          role: "student",
+          studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
+          phone: phone,
+          fatherPhone: fatherPhone,
+          password: "1234",
+          email: `${phone}@alelm.edu.sa`,
+          avatar: name.substring(0, 2),
+          currentProgramId: prog.id,
+          currentLevelId: "lvl_ts_1",
+          groupId: "grp_ts_101",
+          supervisorId:
+            state.currentUser.id === "admin"
+              ? "supervisor_1"
+              : state.currentUser.id,
+          progress: 0,
+          isRestricted: false,
+        };
+
+        db.users.push(newStudent);
+        count++;
+      }
+    });
+
+    alert(`تم استيراد وإضافة (${count}) طالب بنجاح.`);
+    navigateTo("students");
+  };
+  reader.readAsText(file);
+}
+
+function handleSupervisorExcelImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    const text = e.target.result;
+    const lines = text.split("\n").filter((l) => l.trim() !== "");
+    let count = 0;
+
+    lines.forEach((line, idx) => {
+      if (idx === 0 && line.includes("اسم")) return;
+      const parts = line.split(",").map((p) => p.trim());
+      if (parts.length >= 2) {
+        const name = parts[0];
+        const phone = parts[1];
+        const progName = parts[2] || "تأصيل";
+        const prog =
+          db.programs.find((p) => p.name.includes(progName)) || db.programs[1];
+
+        const newSupervisor = {
+          id: `supervisor_${Date.now()}_${count}`,
+          name: name,
+          role: "supervisor",
+          phone: phone,
+          password: "1234",
+          email: `${phone}@alelm.edu.sa`,
+          avatar: name.substring(0, 2),
+          color: "#169BA2",
+          assignedPrograms: [prog.id],
+          assignedGroups: [],
+          isRestricted: false,
+        };
+
+        db.users.push(newSupervisor);
+        count++;
+      }
+    });
+
+    alert(`تم استيراد وإضافة (${count}) مشرف بنجاح.`);
+    navigateTo("supervisors");
+  };
+  reader.readAsText(file);
+}
+
+// 7. نظام التحضير المتعدد والغياب التلقائي
+function toggleSelectAllAttendance(masterCheckbox) {
+  const checkboxes = document.querySelectorAll(".stu-att-checkbox");
+  checkboxes.forEach((cb) => (cb.checked = masterCheckbox.checked));
+}
+
+function bulkRecordAttendance(scheduleId, status) {
+  const selectedBoxes = document.querySelectorAll(".stu-att-checkbox:checked");
+  if (selectedBoxes.length === 0) {
+    alert("يرجى تحديد طالب واحد على الأقل للتحضير الجماعي!");
+    return;
+  }
+
+  selectedBoxes.forEach((cb) => {
+    recordAttendance(scheduleId, cb.value, status);
+  });
+
+  alert(`تم رصد حالة (${status}) لعدد (${selectedBoxes.length}) طالب.`);
+  views.updateAttendanceModalView(scheduleId);
+  views.openAttendanceModal(scheduleId);
+}
+
+function markRemainingAbsent(scheduleId) {
+  const schedule = db.schedules.find((s) => s.id === scheduleId);
+  if (!schedule) return;
+
+  const students = db.users.filter(
+    (u) =>
+      u.role === "student" &&
+      u.currentProgramId === schedule.programId &&
+      !u.isRestricted,
+  );
+  let markedCount = 0;
+
+  students.forEach((st) => {
+    const currentStatus = getStudentAttendanceStatus(scheduleId, st.id);
+    if (currentStatus === "غير محدد") {
+      recordAttendance(scheduleId, st.id, "غائب");
+      markedCount++;
+    }
+  });
+
+  alert(`تم احتساب (${markedCount}) طالب كـ (غائب) تلقائياً.`);
+  views.updateAttendanceModalView(scheduleId);
+  views.openAttendanceModal(scheduleId);
+}
+
+// 8. تزامن التواريخ الهجرية والميلادية
+function getWeekDateDetails(dayOfWeekIndex, weekOffset = 0) {
+  const today = new Date();
+  const currentDay = today.getDay();
+
+  const targetDate = new Date(today);
+  const dayDiff = dayOfWeekIndex - currentDay + weekOffset * 7;
+  targetDate.setDate(today.getDate() + dayDiff);
+
+  const gregStr = targetDate.toLocaleDateString("ar-SA-u-nu-latn", {
+    day: "numeric",
+    month: "numeric",
+  });
+
+  let hijriStr = "";
+  try {
+    hijriStr = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-umalqura-nu-latn", {
+      day: "numeric",
+      month: "numeric",
+    }).format(targetDate);
+  } catch (e) {
+    hijriStr = gregStr;
+  }
+
+  return {
+    gregorian: gregStr,
+    hijri: hijriStr,
+    fullDate: targetDate.toISOString().split("T")[0],
+  };
+}
+
+// 9. حساب العداد التنازلي الحي للمهام
+function calculateTimeRemaining(dateStr, timeStr) {
+  if (!dateStr) return { isOverdue: false, text: "غير محدد" };
+
+  const target = new Date(`${dateStr}T17:00:00`);
+  const now = new Date();
+  const diff = target - now;
+
+  if (diff <= 0) {
+    return { isOverdue: true, text: "انتهى الوقت / متأخرة" };
+  }
+
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+  if (days > 0) {
+    return { isOverdue: false, text: `متبقي ${days} يوم و ${hours} ساعة` };
+  } else {
+    return { isOverdue: false, text: `متبقي ${hours} ساعة و ${minutes} دقيقة` };
+  }
+}
+
+// 10. ترقية الطالب إلى المستوى القادم
+function promoteStudent(studentId) {
+  const student = db.users.find((u) => u.id === studentId);
+  if (!student) return;
+
+  const programLevels = db.levels
+    .filter((l) => l.programId === student.currentProgramId)
+    .sort((a, b) => a.order - b.order);
+  const currentLevelIndex = programLevels.findIndex(
+    (l) => l.id === student.currentLevelId,
+  );
+
+  if (
+    currentLevelIndex !== -1 &&
+    currentLevelIndex < programLevels.length - 1
+  ) {
+    const nextLevel = programLevels[currentLevelIndex + 1];
+    student.currentLevelId = nextLevel.id;
+    student.progress = Math.min(100, student.progress + 35);
+    alert(`تمت ترقية الطالب (${student.name}) إلى: ${nextLevel.name}`);
+  } else {
+    alert(
+      `الطالب (${student.name}) في أعلى مستوى ببرنامج ${getProgramName(student.currentProgramId)}!`,
+    );
+  }
+
+  navigateTo("students");
+}
+
+// 11. تقييد وفك تقييد الحساب
+function toggleUserRestriction(userId) {
+  const user = db.users.find((u) => u.id === userId);
+  if (!user) return;
+
+  user.isRestricted = !user.isRestricted;
+  const statusText = user.isRestricted ? "تقييد" : "فك تقييد";
+  alert(`تم ${statusText} حساب (${user.name}) بنجاح.`);
+
+  if (user.role === "student") navigateTo("students");
+  else if (user.role === "supervisor") navigateTo("supervisors");
+}
+
+// 12. اعتماد وتعديل بيانات الطلاب
+function approveProfileEdit(editId) {
+  const editIndex = db.pendingProfileEdits.findIndex((e) => e.id === editId);
+  if (editIndex === -1) return;
+
+  const req = db.pendingProfileEdits[editIndex];
+  const student = db.users.find((u) => u.id === req.studentId);
+
+  if (student) {
+    if (req.newPhone) student.phone = req.newPhone;
+    if (req.newFatherPhone) student.fatherPhone = req.newFatherPhone;
+    if (req.newEmail) student.email = req.newEmail;
+  }
+
+  db.pendingProfileEdits.splice(editIndex, 1);
+  alert(`تم اعتماد وتحديث بيانات الطالب (${req.studentName}) بنجاح.`);
+  navigateTo("students");
+}
+
+function rejectProfileEdit(editId) {
+  if (!confirm("هل أنت متأكد من رفض طلب تعديل البيانات؟")) return;
+  db.pendingProfileEdits = db.pendingProfileEdits.filter(
+    (e) => e.id !== editId,
+  );
+  navigateTo("students");
+}
+
+// 13. استرجاع المهام
+function getVisibleTasks(user, programId = null) {
+  if (!user) return [];
+
+  return db.tasks.filter((task) => {
+    if (programId && task.programId !== programId) return false;
+    if (user.role === "admin") return true;
+    if (user.role === "student") return task.assignedTo === user.id;
+
+    if (user.role === "supervisor") {
+      const userPrograms = user.assignedPrograms || [];
+      return userPrograms.includes(task.programId);
+    }
+    return false;
+  });
+}
+
+// 14. إعفاء المهمة للمدير
+function exemptTask(taskId, reason) {
+  const task = db.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+
+  task.status = "معفى بعذر";
+  task.isExempt = true;
+  task.exemptionReason = reason || "إعفاء معتمد من إدارة المنصة.";
+
+  db.notifications.unshift({
+    id: `notif_${Date.now()}`,
+    userId: task.assignedTo,
+    category: "إعفاء من مهمة",
+    title: "تم اعتماد إعفاء لك من مهمة",
+    message: `تم اعتماد إعفائك من مهمة (${task.title}). السبب: ${task.exemptionReason}`,
+    date: "الآن",
+    isRead: false,
+  });
+
+  closeModal("task-modal");
+  alert("تم اعتماد الإعفاء للمهمة بنجاح.");
+  navigateTo(state.currentView);
+}
+
+// 15. قبول ورفض تسجيل الطلاب
+function acceptStudentRequest(reqId) {
+  const reqIndex = db.registrationRequests.findIndex((r) => r.id === reqId);
+  if (reqIndex === -1) return;
+
+  const req = db.registrationRequests[reqIndex];
+  const defaultLevel = db.levels.find(
+    (l) => l.programId === req.programId && l.order === 1,
+  );
+
+  const newStudent = {
+    id: `student_${Date.now()}`,
+    name: req.name,
+    role: "student",
+    studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
+    phone: req.phone,
+    fatherPhone: req.fatherPhone,
+    password: "1234",
+    email: `${req.phone}@alelm.edu.sa`,
+    avatar: req.name.substring(0, 2),
+    currentProgramId: req.programId,
+    currentLevelId: defaultLevel ? defaultLevel.id : "lvl_ts_1",
+    groupId: "grp_ts_101",
+    supervisorId:
+      state.currentUser.id === "admin" ? "supervisor_1" : state.currentUser.id,
+    progress: 0,
+    isRestricted: false,
+  };
+
+  db.users.push(newStudent);
+  db.registrationRequests.splice(reqIndex, 1);
+  alert(`تم قبول الطالب (${req.name}) بنجاح.`);
+  navigateTo("students");
+}
+
+function rejectStudentRequest(reqId) {
+  if (!confirm("هل أنت متأكد من رفض طلب التسجيل؟")) return;
+  db.registrationRequests = db.registrationRequests.filter(
+    (r) => r.id !== reqId,
+  );
+  navigateTo("students");
+}
+
+// 16. إضافة وتعديل الطلاب والمشرفين
+function addNewStudent(data) {
+  const defaultLevel = db.levels.find(
+    (l) => l.programId === data.currentProgramId && l.order === 1,
+  );
+
+  const newStudent = {
+    id: `student_${Date.now()}`,
+    name: data.name,
+    role: "student",
+    studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
+    phone: data.phone,
+    fatherPhone: data.fatherPhone,
+    password: "1234",
+    email: `${data.phone}@alelm.edu.sa`,
+    avatar: data.name.substring(0, 2),
+    currentProgramId: data.currentProgramId,
+    currentLevelId: defaultLevel ? defaultLevel.id : "lvl_ts_1",
+    groupId: "grp_ts_101",
+    supervisorId:
+      state.currentUser.id === "admin" ? "supervisor_1" : state.currentUser.id,
+    progress: 0,
+    isRestricted: false,
+  };
+
+  db.users.push(newStudent);
+  closeModal("add-student-modal");
+  alert("تم إضافة الطالب بنجاح.");
+  navigateTo("students");
+}
+
+function updateStudentData(studentId, data) {
+  const student = db.users.find((u) => u.id === studentId);
+  if (!student) return;
+
+  student.name = data.name;
+  student.phone = data.phone;
+  student.fatherPhone = data.fatherPhone;
+  student.currentProgramId = data.currentProgramId;
+  if (data.password) student.password = data.password;
+
+  closeModal("edit-student-modal");
+  alert(`تم تحديث بيانات الطالب (${student.name}) بنجاح.`);
+  navigateTo("students");
+}
+
+function addNewSupervisor(data) {
+  const colors = ["#169BA2", "#E59824", "#8AA838", "#9E1B48", "#2B1736"];
+  const assignedColor =
+    colors[
+      db.users.filter((u) => u.role === "supervisor").length % colors.length
+    ];
+
+  const newSupervisor = {
+    id: `supervisor_${Date.now()}`,
+    name: data.name,
+    role: "supervisor",
+    phone: data.phone,
+    password: "1234",
+    email: `${data.phone}@alelm.edu.sa`,
+    avatar: data.name.substring(0, 2),
+    color: assignedColor,
+    assignedPrograms: data.assignedPrograms,
+    assignedGroups: [],
+    isRestricted: false,
+  };
+
+  db.users.push(newSupervisor);
+  closeModal("add-supervisor-modal");
+  alert("تم إضافة المشرف بنجاح.");
+  navigateTo("supervisors");
+}
+
+function deleteSupervisor(supervisorId) {
+  if (!confirm("هل أنت متأكد من حذف هذا المشرف نهائياً؟")) return;
+  db.users = db.users.filter((u) => u.id !== supervisorId);
+  navigateTo("supervisors");
+}
+
+// 17. تحديث الملف الشخصي
+function updateProfile() {
+  const name = document.getElementById("set-user-name").value;
+  const phone = document.getElementById("set-user-phone").value;
+  const email = document.getElementById("set-user-email").value;
+
+  if (state.currentUser.role === "student") {
+    db.pendingProfileEdits.push({
+      id: `edit_${Date.now()}`,
+      studentId: state.currentUser.id,
+      studentName: state.currentUser.name,
+      newPhone: phone,
+      newEmail: email,
+      requestDate: new Date().toISOString().split("T")[0],
       status: "بانتظار الاعتماد",
-    },
-  ],
+    });
+    alert("تم إرسال طلب التعديل للاعتماد.");
+  } else {
+    state.currentUser.name = name;
+    state.currentUser.phone = phone;
+    state.currentUser.email = email;
+    document.getElementById("header-user-name").innerText = name;
+    alert("تم حفظ البيانات بنجاح.");
+  }
+}
 
-  // 8. سجل مشاركات الطلاب في البرامج[cite: 18]
-  studentPrograms: [
-    {
-      id: "sp_1",
-      studentId: "student_1",
-      programId: "prog_taseel",
-      status: "مستمر",
-      startDate: "2026-01-15",
-      endDate: null,
-    },
-    {
-      id: "sp_2_old",
-      studentId: "student_2",
-      programId: "prog_taheel",
-      status: "مكتمل",
-      startDate: "2025-09-01",
-      endDate: "2026-01-10",
-    },
-    {
-      id: "sp_2_curr",
-      studentId: "student_2",
-      programId: "prog_taseel",
-      status: "مستمر",
-      startDate: "2026-01-15",
-      endDate: null,
-    },
-    {
-      id: "sp_3",
-      studentId: "student_3",
-      programId: "prog_rasookh",
-      status: "مستمر",
-      startDate: "2026-02-01",
-      endDate: null,
-    },
-  ],
+// 18. نظام التحضير الذكي
+function recordAttendance(scheduleId, studentId, status) {
+  if (!db.attendanceRecords) db.attendanceRecords = [];
 
-  // 9. مسار التاريخ التعليمي للطالب[cite: 18]
-  studentPaths: [
-    {
-      studentId: "student_1",
-      history: [
-        {
-          programName: "تأصيل",
-          status: "مستمر",
-          period: "2026 - الحالي",
-          isCurrent: true,
-        },
-      ],
-    },
-    {
-      studentId: "student_2",
-      history: [
-        {
-          programName: "تأهيل",
-          status: "مكتمل",
-          period: "2025 - 2026",
-          isCurrent: false,
-        },
-        {
-          programName: "تأصيل",
-          status: "مستمر",
-          period: "2026 - الحالي",
-          isCurrent: true,
-        },
-      ],
-    },
-    {
-      studentId: "student_3",
-      history: [
-        {
-          programName: "رسوخ",
-          status: "مستمر",
-          period: "2026 - الحالي",
-          isCurrent: true,
-        },
-      ],
-    },
-  ],
+  let record = db.attendanceRecords.find(
+    (r) => r.scheduleId === scheduleId && r.studentId === studentId,
+  );
+  const now = new Date();
+  const timeStr = `${now.toLocaleDateString("ar-SA")} - ${now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`;
 
-  // 10. عناصر الجدول الأسبوعي[cite: 18]
-  schedules: [
-    {
-      id: "sch_ts_1",
-      programId: "prog_taseel",
-      groupId: "grp_ts_101",
-      dayOfWeek: 0,
-      time: "05:00 م",
-      title: "درس أصول الفقه - الوحدة الأولى",
-      type: "lesson",
-      typeLabel: "درس",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "قراءة الباب الأول وتحضير أسئلة المناقشة.",
-    },
-    {
-      id: "sch_ts_2",
-      programId: "prog_taseel",
-      groupId: "grp_ts_101",
-      dayOfWeek: 2,
-      time: "06:30 م",
-      title: "لقاء المدارسة التفاعلي",
-      type: "meeting",
-      typeLabel: "لقاء",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "حضور اللقاء التفاعلي مع أ. أحمد الميموني عبر القاعة الرقمية.",
-    },
-    {
-      id: "sch_ts_3",
-      programId: "prog_taseel",
-      groupId: "grp_ts_101",
-      dayOfWeek: 3,
-      time: "07:00 م",
-      title: "اختبار منتصف البرنامج",
-      type: "exam",
-      typeLabel: "اختبار",
-      status: "قادم",
-      requiresAttendance: false,
-      details: "اختبار تحصيلي إلكتروني يحتوي 20 سؤال اختيار من متعدد.",
-    },
-    {
-      id: "sch_th_1",
-      programId: "prog_taheel",
-      groupId: "grp_th_001",
-      dayOfWeek: 1,
-      time: "04:30 م",
-      title: "مدخل البناء العلمي والتأسيس",
-      type: "lesson",
-      typeLabel: "درس",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "شرح المقدمة المنهجية لطلاب التأهيل.",
-    },
-    {
-      id: "sch_th_2",
-      programId: "prog_taheel",
-      groupId: "grp_th_001",
-      dayOfWeek: 4,
-      time: "05:00 م",
-      title: "حلقة مدارسة التلاوة وضبط الأداء",
-      type: "lesson",
-      typeLabel: "نشاط",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "تطبيق أحكام التجويد ومخارج الحروف.",
-    },
-    {
-      id: "sch_rs_1",
-      programId: "prog_rasookh",
-      groupId: "grp_rs_201",
-      dayOfWeek: 0,
-      time: "07:30 م",
-      title: "حلقة التحليل والتمكين المتقدم",
-      type: "meeting",
-      typeLabel: "لقاء",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "مناقشة أبحاث التخرج وقضايا الخلاف العالي.",
-    },
-    {
-      id: "sch_rs_2",
-      programId: "prog_rasookh",
-      groupId: "grp_rs_201",
-      dayOfWeek: 6,
-      time: "06:00 م",
-      title: "التقييم الأسبوعي ومقياس الرسوخ",
-      type: "assessment",
-      typeLabel: "تقييم",
-      status: "قادم",
-      requiresAttendance: false,
-      details: "مراجعة المؤشرات المهارية والبحثية.",
-    },
-  ],
+  if (record) {
+    record.status = status;
+    record.updatedAt = timeStr;
+    record.recordedBy = state.currentUser.id;
+  } else {
+    db.attendanceRecords.push({
+      id: `att_${Date.now()}_${studentId}`,
+      scheduleId: scheduleId,
+      studentId: studentId,
+      status: status,
+      updatedAt: timeStr,
+      recordedBy: state.currentUser.id,
+    });
+  }
 
-  // 11. سجلات الحضور والتحضير[cite: 18]
-  attendanceRecords: [
-    {
-      id: "att_1",
-      scheduleId: "sch_ts_1",
-      studentId: "student_1",
-      status: "حاضر",
-      updatedAt: "2026-08-23 05:10 م",
-      recordedBy: "supervisor_1",
-    },
-  ],
+  if (window.views && window.views.updateAttendanceModalView) {
+    window.views.updateAttendanceModalView(scheduleId);
+  }
+}
 
-  // 12. سجل المهام والتكليفات[cite: 18]
-  tasks: [
-    {
-      id: "tsk_201",
-      title: "أن يقوم مسؤول شؤون الطلاب بنفسه بالتحضير الأسبوعي",
-      programId: "prog_taseel",
-      dayOfWeek: 0,
-      date: "2026-08-30",
-      startTime: "04:30 م",
-      endTime: "06:00 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_1",
-      status: "قيد التنفيذ",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: true,
-      recurringDays: [0],
-      stopDate: "2026-11-30",
-      requiresAttendance: true,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "التحضير المسبق وتدوين مداخلات الطلاب ومتابعة نسبة الفهم.",
-    },
-    {
-      id: "tsk_202",
-      title:
-        "أن تعد إدارة البرنامج السؤال الأسبوعي ويكون متعلق بما تم شرحه في هذا الأسبوع",
-      programId: "prog_taseel",
-      dayOfWeek: 0,
-      date: "2026-08-30",
-      startTime: "07:00 م",
-      endTime: "08:30 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_3",
-      status: "مكتملة",
-      completedAt: "2026-08-29 08:15 م",
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: false,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "إعداد السؤال الأسبوعي واعتماد نموذج الإجابة الصحيحة.",
-    },
-    {
-      id: "tsk_203",
-      title: "أن تتواصل إدارة البرنامج مع الطلاب المتغيبين بدون عذر",
-      programId: "prog_taseel",
-      dayOfWeek: 2,
-      date: "2026-09-01",
-      startTime: "06:00 م",
-      endTime: "07:00 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_1",
-      status: "معفى بعذر",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: false,
-      isExempt: true,
-      exemptionReason: "عذر رسمي لانتداب خارجي معتمد من الإدارة.",
-      createdBy: "admin",
-      description: "التواصل الهاتفي المباشر مع أولياء أمور الطلاب المتغيبين.",
-    },
-    {
-      id: "tsk_204",
-      title:
-        "أن يسلم للطلاب جدول قراءة الشرح قبل 5 أيام من بداية الدرس الأسبوعي",
-      programId: "prog_taheel",
-      dayOfWeek: 1,
-      date: "2026-08-31",
-      startTime: "05:00 م",
-      endTime: "06:30 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_2",
-      status: "لم تبدأ",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: true,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "إرسال الجداول بصيغة PDF للطلاب في المجموعة المعتمدة.",
-    },
-    {
-      id: "tsk_101",
-      title:
-        "أن يذكر الطلاب بقراءة المقدار الأسبوعي للمتن في المجموعة الطلابية قبل الدرس",
-      programId: "prog_taseel",
-      dayOfWeek: 1,
-      date: "2026-08-31",
-      startTime: "08:00 ص",
-      endTime: "11:59 م",
-      assigneeRole: "student",
-      assignedTo: "student_1",
-      status: "قيد التنفيذ",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: false,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "التأكد من قراءة المقرر المحدد قبل الحضور.",
-    },
-  ],
+function getStudentAttendanceStatus(scheduleId, studentId) {
+  if (!db.attendanceRecords) return "غير محدد";
+  const record = db.attendanceRecords.find(
+    (r) => r.scheduleId === scheduleId && r.studentId === studentId,
+  );
+  return record ? record.status : "غير محدد";
+}
 
-  // 13. لوحة الإعلانات العامة[cite: 18]
-  announcements: [
-    {
-      id: "anc_1",
-      title: "بدء فتح رصد تحضير الجلسات وحلقات المدارسة",
-      content:
-        "نحيط جميع المشرفين الكرام بأنه تم تفعيل خانات التحضير للمهام والجلسات المحددة في الجدول الأسبوعي. يرجى المبادرة برصد حضور الطلاب في وقت الجلسة.",
-      publisher: "إدارة المنصة المركزية",
-      targetGroup: "supervisors",
-      mediaType: "image",
-      mediaUrl: "logo16.png",
-      date: "2026-08-28",
-      expiresAt: "2026-09-15",
-      priority: "عاجل",
-    },
-    {
-      id: "anc_2",
-      title: "مواعيد اختبارات منتصف برنامج التأصيل",
-      content:
-        "تقرر عقد الاختبار النصفي لطلاب برنامج التأصيل يوم الأربعاء القادم في تمام الساعة 07:00 مساءً إلكترونياً عبر بوابة الاختبارات.",
-      publisher: "أ. أحمد الميموني (مشرف التأصيل)",
-      targetGroup: "prog_taseel",
-      mediaType: "none",
-      mediaUrl: "",
-      date: "2026-08-27",
-      expiresAt: "2026-09-05",
-      priority: "عادي",
-    },
-  ],
+function getUnmarkedAttendanceCount(scheduleId, programId) {
+  const students = db.users.filter(
+    (u) =>
+      u.role === "student" &&
+      u.currentProgramId === programId &&
+      !u.isRestricted,
+  );
+  let unmarked = 0;
+  students.forEach((s) => {
+    const st = getStudentAttendanceStatus(scheduleId, s.id);
+    if (st === "غير محدد") unmarked++;
+  });
+  return unmarked;
+}
 
-  // 14. التنبيهات والإشعارات[cite: 18]
-  notifications: [
-    {
-      id: "notif_101",
-      userId: "admin",
-      category: "إشعار إداري",
-      title: "طلب تسجيل جديد",
-      message: "قام الطالب بدر عسيري بتقديم طلب التحاق ببرنامج التأهيل.",
-      date: "قبل 15 دقيقة",
+// 19. التوكيل وإتمام المهام
+function delegateTask(taskId, newSupervisorId) {
+  const task = db.tasks.find((t) => t.id === taskId);
+  const newSupervisor = db.users.find((u) => u.id === newSupervisorId);
+  const currentSupervisor = state.currentUser;
+
+  if (!task || !newSupervisor) {
+    alert("تعذر إتمام التوكيل.");
+    return;
+  }
+
+  const previousAssigneeName =
+    task.assignedTo === currentSupervisor.id
+      ? currentSupervisor.name
+      : "الإدارة";
+  task.assignedTo = newSupervisor.id;
+  task.delegatedFrom = previousAssigneeName;
+
+  closeModal("task-modal");
+  updateNotificationsBadge();
+  navigateTo(state.currentView);
+}
+
+function toggleTaskCompletion(taskId) {
+  const task = db.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+
+  if (task.status === "مكتملة") {
+    task.status = "قيد التنفيذ";
+    task.completedAt = null;
+  } else {
+    task.status = "مكتملة";
+    const now = new Date();
+    task.completedAt = `${now.toLocaleDateString("ar-SA")} - ${now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`;
+  }
+
+  closeModal("task-modal");
+  navigateTo(state.currentView);
+}
+
+function addNewTask(taskData) {
+  const newTask = {
+    id: `tsk_${Date.now()}`,
+    title: taskData.title,
+    programId: taskData.programId,
+    dayOfWeek: parseInt(taskData.dayOfWeek),
+    date: taskData.date || "2026-08-30",
+    startTime: taskData.startTime || "05:00 م",
+    endTime: taskData.endTime || "06:00 م",
+    assigneeRole: taskData.assigneeRole || "supervisor",
+    assignedTo: taskData.assignedTo || state.currentUser.id,
+    status: "لم تبدأ",
+    completedAt: null,
+    delegatedFrom: null,
+    isRecurring: taskData.isRecurring || false,
+    recurringDays: taskData.recurringDays || [parseInt(taskData.dayOfWeek)],
+    stopDate: taskData.stopDate || null,
+    requiresAttendance: taskData.requiresAttendance || false,
+    isExempt: false,
+    exemptionReason: null,
+    createdBy: state.currentUser.id,
+    description: taskData.description || "",
+  };
+
+  db.tasks.push(newTask);
+  closeModal("add-task-modal");
+  updateNotificationsBadge();
+  navigateTo(state.currentView);
+}
+
+// 20. إرسال الإشعارات الموجهة
+function sendTargetedNotification(data) {
+  const sender = state.currentUser;
+  let targetUserIds = [];
+
+  if (sender.role === "admin") {
+    if (data.targetType === "all") {
+      targetUserIds = db.users.map((u) => u.id);
+    } else if (data.targetType === "program") {
+      targetUserIds = db.users
+        .filter(
+          (u) =>
+            u.currentProgramId === data.targetId ||
+            (u.assignedPrograms && u.assignedPrograms.includes(data.targetId)),
+        )
+        .map((u) => u.id);
+    } else if (data.targetType === "supervisors") {
+      targetUserIds = db.users
+        .filter((u) => u.role === "supervisor")
+        .map((u) => u.id);
+    }
+  } else {
+    targetUserIds = ["admin"];
+  }
+
+  targetUserIds.forEach((uid) => {
+    db.notifications.unshift({
+      id: `notif_${Date.now()}_${uid}`,
+      userId: uid,
+      category: sender.role === "admin" ? "إشعار إداري" : "رسالة واردة",
+      title: data.title,
+      message: `من (${sender.name}): ${data.message}`,
+      date: "الآن",
       isRead: false,
-    },
-    {
-      id: "notif_102",
-      userId: "supervisor_1",
-      category: "تذكير بمهمة",
-      title: "تذكير بمهمة قادمة",
-      message: "لديك مهمة معيارية مجدولة ليوم الأحد القادم.",
-      date: "قبل ساعة",
-      isRead: false,
-    },
-  ],
-};
+    });
+  });
+
+  closeModal("send-notif-modal");
+  updateNotificationsBadge();
+  alert("تم إرسال الإشعار بنجاح.");
+}
+
+// 21. دوال مساعدة
+function getUserColor(userId) {
+  const user = db.users.find((u) => u.id === userId);
+  return user ? user.color || "#169BA2" : "#64748B";
+}
+
+function getUserName(userId) {
+  const user = db.users.find((u) => u.id === userId);
+  return user ? user.name : "غير محدد";
+}
+
+function getProgramName(programId) {
+  const prog = db.programs.find((p) => p.id === programId);
+  return prog ? prog.name : "البرنامج العام";
+}
+
+function changeWeek(offset) {
+  if (offset === 0) {
+    state.currentWeekOffset = 0;
+  } else {
+    state.currentWeekOffset += offset;
+  }
+  navigateTo("schedule");
+}
+
+function toggleNotificationsModal() {
+  const modal = document.getElementById("notifications-modal");
+  if (modal) {
+    modal.classList.toggle("hidden");
+    if (!modal.classList.contains("hidden")) {
+      renderNotificationsList();
+    }
+  }
+}
+
+function renderNotificationsList() {
+  const container = document.getElementById("notifications-list");
+  if (!container) return;
+
+  const notifs = db.notifications.filter(
+    (n) =>
+      n.userId === state.currentUser.id ||
+      n.userId === "all" ||
+      state.currentRole === "admin",
+  );
+
+  if (notifs.length === 0) {
+    container.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs font-medium">لا توجد إشعارات حالية</div>`;
+    return;
+  }
+
+  container.innerHTML = notifs
+    .map(
+      (n) => `
+        <div class="py-2.5 flex items-start space-x-2.5 space-x-reverse ${n.isRead ? "opacity-60" : ""}">
+            <div class="w-7 h-7 rounded-full bg-amber-50 text-[#D4A359] border border-[#D4A359]/30 flex items-center justify-center shrink-0 mt-0.5">
+                <i class="fa-solid fa-bell text-xs"></i>
+            </div>
+            <div class="flex-1">
+                <div class="text-xs font-bold text-slate-800">${n.title}</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">${n.message}</div>
+                <div class="text-[9px] text-slate-400 mt-0.5">${n.date}</div>
+            </div>
+        </div>
+    `,
+    )
+    .join("");
+}
+
+function markAllNotificationsRead() {
+  db.notifications.forEach((n) => {
+    if (
+      n.userId === state.currentUser.id ||
+      n.userId === "all" ||
+      state.currentRole === "admin"
+    ) {
+      n.isRead = true;
+    }
+  });
+  updateNotificationsBadge();
+  renderNotificationsList();
+}
+
+function updateNotificationsBadge() {
+  const badge = document.getElementById("notif-badge");
+  if (!badge || !state.currentUser) return;
+  const unread = db.notifications.filter(
+    (n) =>
+      (n.userId === state.currentUser.id ||
+        n.userId === "all" ||
+        state.currentRole === "admin") &&
+      !n.isRead,
+  ).length;
+  if (unread > 0) {
+    badge.innerText = unread;
+    badge.style.display = "inline-block";
+  } else {
+    badge.style.display = "none";
+  }
+}
+
+function closeModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) modal.remove();
+}
