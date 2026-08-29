@@ -1,6 +1,7 @@
 /**
  * app.js - محرك المنصة الرئيسي وإدارة العمليات الشاملة
- * يدعم: المنصة الالكترونية، استيراد Excel/CSV، التحضير الجماعي والغياب التلقائي، وإدارة الصلاحيات التامة.
+ * يدعم: إظهار التنبيهات للجميع فور تسجيل الدخول، توحيد مسمى (برنامج)،
+ * إظهار القائمة الجانبية بالكامل، استيراد Excel، والتحضير الجماعي التلقائي.
  */
 
 const state = {
@@ -12,7 +13,7 @@ const state = {
   scheduleViewMode: "stacked",
 };
 
-// 1. التهيئة الآمنة للبدء في شاشة بوابة المسارات
+// 1. التهيئة للبدء في شاشة البوابة
 function initApp() {
   if (!window.db || !window.db.users) {
     setTimeout(initApp, 50);
@@ -28,11 +29,10 @@ if (document.readyState === "loading") {
   initApp();
 }
 
-// 2. إخفاء وإظهار عناصر التحكم والهيدر والقائمة الجانبية
+// 2. إخفاء وإظهار عناصر التحكم والقائمة الجانبية
 function hideAppControls() {
   const sidebar = document.getElementById("main-sidebar");
   const userControls = document.getElementById("header-user-badge");
-  const portalBtn = document.getElementById("header-portal-btn");
   const mobileMenuBtn = document.getElementById("mobile-menu-btn");
   const notifContainer = document.getElementById("notif-container");
 
@@ -41,7 +41,6 @@ function hideAppControls() {
     sidebar.classList.remove("md:block");
   }
   if (userControls) userControls.classList.add("hidden");
-  if (portalBtn) portalBtn.classList.add("hidden");
   if (mobileMenuBtn) mobileMenuBtn.classList.add("hidden");
   if (notifContainer) notifContainer.classList.add("hidden");
 }
@@ -49,31 +48,26 @@ function hideAppControls() {
 function showAppControls(user) {
   const sidebar = document.getElementById("main-sidebar");
   const userControls = document.getElementById("header-user-badge");
-  const portalBtn = document.getElementById("header-portal-btn");
   const mobileMenuBtn = document.getElementById("mobile-menu-btn");
   const notifContainer = document.getElementById("notif-container");
 
+  // إظهار القائمة الجانبية بالكامل على سطح المكتب وتفعيلها للجوال
   if (sidebar) {
     sidebar.classList.remove("hidden");
+    sidebar.classList.remove("md:hidden");
     sidebar.classList.add("md:block");
   }
   if (userControls) {
     userControls.classList.remove("hidden");
     userControls.classList.add("flex");
   }
-  if (portalBtn) {
-    portalBtn.classList.remove("hidden");
-  }
   if (mobileMenuBtn) {
     mobileMenuBtn.classList.remove("hidden");
   }
 
+  // إظهار مركز التنبيهات لجميع المستخدمين فور تسجيل الدخول
   if (notifContainer) {
-    if (user.role === "admin") {
-      notifContainer.classList.remove("hidden");
-    } else {
-      notifContainer.classList.add("hidden");
-    }
+    notifContainer.classList.remove("hidden");
   }
 
   const nameEl = document.getElementById("header-user-name");
@@ -91,8 +85,6 @@ function showAppControls(user) {
   }
   if (avatarEl) {
     avatarEl.innerText = user.avatar;
-    avatarEl.style.borderColor = user.color || "#169BA2";
-    avatarEl.style.color = user.color || "#169BA2";
   }
 
   if (window.views && typeof window.views.renderSidebar === "function") {
@@ -100,7 +92,7 @@ function showAppControls(user) {
   }
 }
 
-// 3. التحقق وتسجيل الدخول للمسار المحدد
+// 3. التحقق وتسجيل الدخول
 function handleLoginSubmit(programId) {
   const userSelect = document.getElementById("login-user-select").value;
   const phoneInput = document.getElementById("login-phone").value.trim();
@@ -149,7 +141,7 @@ function logoutUser() {
   navigateTo("portal");
 }
 
-// 4. اختيار المسار من البوابة
+// 4. اختيار البرنامج والدخول
 function selectProgramPath(progId) {
   state.currentProgramId = progId;
   if (!state.currentUser) {
@@ -179,11 +171,6 @@ function toggleMobileSidebar() {
 
 function toggleScheduleViewMode(mode) {
   state.scheduleViewMode = mode;
-  navigateTo("schedule");
-}
-
-function switchSupervisorProgram(progId) {
-  state.currentProgramId = progId;
   navigateTo("schedule");
 }
 
@@ -269,7 +256,7 @@ function handleStudentExcelImport(event) {
     let count = 0;
 
     lines.forEach((line, idx) => {
-      if (idx === 0 && line.includes("اسم")) return; // تجاهل ترويسة الملف
+      if (idx === 0 && line.includes("اسم")) return;
       const parts = line.split(",").map((p) => p.trim());
       if (parts.length >= 2) {
         const name = parts[0];
@@ -356,7 +343,7 @@ function handleSupervisorExcelImport(event) {
   reader.readAsText(file);
 }
 
-// 7. نظام التحضير الجماعي والغياب التلقائي
+// 7. نظام التحضير المتعدد والغياب التلقائي
 function toggleSelectAllAttendance(masterCheckbox) {
   const checkboxes = document.querySelectorAll(".stu-att-checkbox");
   checkboxes.forEach((cb) => (cb.checked = masterCheckbox.checked));
@@ -365,7 +352,7 @@ function toggleSelectAllAttendance(masterCheckbox) {
 function bulkRecordAttendance(scheduleId, status) {
   const selectedBoxes = document.querySelectorAll(".stu-att-checkbox:checked");
   if (selectedBoxes.length === 0) {
-    alert("يرجى تحديد طالب واحد على الأقل من القائمة للتحضير الجماعي!");
+    alert("يرجى تحديد طالب واحد على الأقل للتحضير الجماعي!");
     return;
   }
 
@@ -373,7 +360,7 @@ function bulkRecordAttendance(scheduleId, status) {
     recordAttendance(scheduleId, cb.value, status);
   });
 
-  alert(`تم رصد حالة (${status}) لعدد (${selectedBoxes.length}) طالب بنجاح.`);
+  alert(`تم رصد حالة (${status}) لعدد (${selectedBoxes.length}) طالب.`);
   views.updateAttendanceModalView(scheduleId);
   views.openAttendanceModal(scheduleId);
 }
@@ -398,12 +385,12 @@ function markRemainingAbsent(scheduleId) {
     }
   });
 
-  alert(`تم احتساب (${markedCount}) طالب غير مرصود كـ (غائب) تلقائياً.`);
+  alert(`تم احتساب (${markedCount}) طالب كـ (غائب) تلقائياً.`);
   views.updateAttendanceModalView(scheduleId);
   views.openAttendanceModal(scheduleId);
 }
 
-// 8. تزامن التواريخ الهجرية والميلادية للأسبوع
+// 8. تزامن التواريخ الهجرية والميلادية
 function getWeekDateDetails(dayOfWeekIndex, weekOffset = 0) {
   const today = new Date();
   const currentDay = today.getDay();
@@ -476,17 +463,17 @@ function promoteStudent(studentId) {
     const nextLevel = programLevels[currentLevelIndex + 1];
     student.currentLevelId = nextLevel.id;
     student.progress = Math.min(100, student.progress + 35);
-    alert(`تمت ترقية الطالب (${student.name}) بنجاح إلى: ${nextLevel.name}`);
+    alert(`تمت ترقية الطالب (${student.name}) إلى: ${nextLevel.name}`);
   } else {
     alert(
-      `الطالب (${student.name}) وصل إلى أعلى مستوى في مسار ${getProgramName(student.currentProgramId)}!`,
+      `الطالب (${student.name}) في أعلى مستوى ببرنامج ${getProgramName(student.currentProgramId)}!`,
     );
   }
 
   navigateTo("students");
 }
 
-// 11. تقييد أو إلغاء تقييد حساب المستخدم
+// 11. تقييد وفك تقييد الحساب
 function toggleUserRestriction(userId) {
   const user = db.users.find((u) => u.id === userId);
   if (!user) return;
@@ -499,7 +486,7 @@ function toggleUserRestriction(userId) {
   else if (user.role === "supervisor") navigateTo("supervisors");
 }
 
-// 12. اعتماد ورفض طلبات تعديل بيانات الطلاب من الإعدادات
+// 12. اعتماد وتعديل بيانات الطلاب
 function approveProfileEdit(editId) {
   const editIndex = db.pendingProfileEdits.findIndex((e) => e.id === editId);
   if (editIndex === -1) return;
@@ -526,38 +513,7 @@ function rejectProfileEdit(editId) {
   navigateTo("students");
 }
 
-// 13. إضافة وحذف الإعلانات
-function addNewAnnouncement(data) {
-  const newAnc = {
-    id: `anc_${Date.now()}`,
-    title: data.title,
-    content: data.content,
-    publisher:
-      state.currentUser.role === "admin"
-        ? "إدارة المنصة المركزية"
-        : `${state.currentUser.name} (مشرف)`,
-    targetGroup: data.targetGroup || "all",
-    mediaType: data.mediaType || "none",
-    mediaUrl: data.mediaUrl || "",
-    date: new Date().toISOString().split("T")[0],
-    expiresAt: data.expiresAt || "2026-12-31",
-    priority: data.priority || "عادي",
-  };
-
-  db.announcements.unshift(newAnc);
-  closeModal("add-announcement-modal");
-  updateNotificationsBadge();
-  alert("تم نشر الإعلان بنجاح.");
-  navigateTo("announcements");
-}
-
-function deleteAnnouncement(ancId) {
-  if (!confirm("هل أنت متأكد من حذف هذا الإعلان؟")) return;
-  db.announcements = db.announcements.filter((a) => a.id !== ancId);
-  navigateTo("announcements");
-}
-
-// 14. استرجاع المهام المصرح برؤيتها
+// 13. استرجاع المهام
 function getVisibleTasks(user, programId = null) {
   if (!user) return [];
 
@@ -574,7 +530,7 @@ function getVisibleTasks(user, programId = null) {
   });
 }
 
-// 15. إعفاء المهمة للمدير
+// 14. إعفاء المهمة للمدير
 function exemptTask(taskId, reason) {
   const task = db.tasks.find((t) => t.id === taskId);
   if (!task) return;
@@ -598,7 +554,7 @@ function exemptTask(taskId, reason) {
   navigateTo(state.currentView);
 }
 
-// 16. قبول ورفض طلبات تسجيل الطلاب
+// 15. قبول ورفض تسجيل الطلاب
 function acceptStudentRequest(reqId) {
   const reqIndex = db.registrationRequests.findIndex((r) => r.id === reqId);
   if (reqIndex === -1) return;
@@ -628,28 +584,8 @@ function acceptStudentRequest(reqId) {
   };
 
   db.users.push(newStudent);
-  db.studentPrograms.push({
-    id: `sp_${Date.now()}`,
-    studentId: newStudent.id,
-    programId: req.programId,
-    status: "مستمر",
-    startDate: new Date().toISOString().split("T")[0],
-    endDate: null,
-  });
-  db.studentPaths.push({
-    studentId: newStudent.id,
-    history: [
-      {
-        programName: getProgramName(req.programId),
-        status: "مستمر",
-        period: "2026 - الحالي",
-        isCurrent: true,
-      },
-    ],
-  });
-
   db.registrationRequests.splice(reqIndex, 1);
-  alert(`تم قبول الطالب (${req.name}) بنجاح وإضافته للبرنامج.`);
+  alert(`تم قبول الطالب (${req.name}) بنجاح.`);
   navigateTo("students");
 }
 
@@ -661,7 +597,7 @@ function rejectStudentRequest(reqId) {
   navigateTo("students");
 }
 
-// 17. إضافة وتعديل الطلاب والمشرفين
+// 16. إضافة وتعديل الطلاب والمشرفين
 function addNewStudent(data) {
   const defaultLevel = db.levels.find(
     (l) => l.programId === data.currentProgramId && l.order === 1,
@@ -687,26 +623,6 @@ function addNewStudent(data) {
   };
 
   db.users.push(newStudent);
-  db.studentPrograms.push({
-    id: `sp_${Date.now()}`,
-    studentId: newStudent.id,
-    programId: data.currentProgramId,
-    status: "مستمر",
-    startDate: new Date().toISOString().split("T")[0],
-    endDate: null,
-  });
-  db.studentPaths.push({
-    studentId: newStudent.id,
-    history: [
-      {
-        programName: getProgramName(data.currentProgramId),
-        status: "مستمر",
-        period: "2026 - الحالي",
-        isCurrent: true,
-      },
-    ],
-  });
-
   closeModal("add-student-modal");
   alert("تم إضافة الطالب بنجاح.");
   navigateTo("students");
@@ -750,7 +666,7 @@ function addNewSupervisor(data) {
 
   db.users.push(newSupervisor);
   closeModal("add-supervisor-modal");
-  alert("تم إضافة المشرف وإسناد البرامج بنجاح.");
+  alert("تم إضافة المشرف بنجاح.");
   navigateTo("supervisors");
 }
 
@@ -760,7 +676,7 @@ function deleteSupervisor(supervisorId) {
   navigateTo("supervisors");
 }
 
-// 18. تحديث الملف الشخصي
+// 17. تحديث الملف الشخصي
 function updateProfile() {
   const name = document.getElementById("set-user-name").value;
   const phone = document.getElementById("set-user-phone").value;
@@ -776,17 +692,17 @@ function updateProfile() {
       requestDate: new Date().toISOString().split("T")[0],
       status: "بانتظار الاعتماد",
     });
-    alert("تم إرسال طلب تحديث البيانات بنجاح إلى المشرف والإدارة للاعتماد.");
+    alert("تم إرسال طلب التعديل للاعتماد.");
   } else {
     state.currentUser.name = name;
     state.currentUser.phone = phone;
     state.currentUser.email = email;
     document.getElementById("header-user-name").innerText = name;
-    alert("تم حفظ وتحديث البيانات بنجاح.");
+    alert("تم حفظ البيانات بنجاح.");
   }
 }
 
-// 19. نظام التحضير الذكي
+// 18. نظام التحضير الذكي
 function recordAttendance(scheduleId, studentId, status) {
   if (!db.attendanceRecords) db.attendanceRecords = [];
 
@@ -839,22 +755,14 @@ function getUnmarkedAttendanceCount(scheduleId, programId) {
   return unmarked;
 }
 
-// 20. التوكيل وإتمام المهام وإضافة المهام الدورية
+// 19. التوكيل وإتمام المهام
 function delegateTask(taskId, newSupervisorId) {
   const task = db.tasks.find((t) => t.id === taskId);
   const newSupervisor = db.users.find((u) => u.id === newSupervisorId);
   const currentSupervisor = state.currentUser;
 
   if (!task || !newSupervisor) {
-    alert("تعذر إتمام التوكيل، بيانات غير مكتملة.");
-    return;
-  }
-
-  if (
-    newSupervisor.role === "supervisor" &&
-    !newSupervisor.assignedPrograms.includes(task.programId)
-  ) {
-    alert("لا يمكن توكيل المهمة لمشرف غير مسجل في نفس هذا البرنامج!");
+    alert("تعذر إتمام التوكيل.");
     return;
   }
 
@@ -862,19 +770,8 @@ function delegateTask(taskId, newSupervisorId) {
     task.assignedTo === currentSupervisor.id
       ? currentSupervisor.name
       : "الإدارة";
-
   task.assignedTo = newSupervisor.id;
   task.delegatedFrom = previousAssigneeName;
-
-  db.notifications.unshift({
-    id: `notif_${Date.now()}`,
-    userId: newSupervisor.id,
-    category: "توكيل مهام",
-    title: "تم توكيل مهمة جديدة إليك",
-    message: `قام ${previousAssigneeName} بتوكيل مهمة "${task.title}" إليك في مسار ${getProgramName(task.programId)}.`,
-    date: "الآن",
-    isRead: false,
-  });
 
   closeModal("task-modal");
   updateNotificationsBadge();
@@ -923,30 +820,19 @@ function addNewTask(taskData) {
   };
 
   db.tasks.push(newTask);
-
-  db.notifications.unshift({
-    id: `notif_${Date.now()}`,
-    userId: newTask.assignedTo,
-    category: "تذكير بمهمة",
-    title: "تنبيه: تم جدولة مهمة جديدة",
-    message: `تمت جدولة مهمة "${newTask.title}" المقررة في ${newTask.startTime}.`,
-    date: "الآن",
-    isRead: false,
-  });
-
   closeModal("add-task-modal");
   updateNotificationsBadge();
   navigateTo(state.currentView);
 }
 
-// 21. إرسال الإشعارات الموجهة
+// 20. إرسال الإشعارات الموجهة
 function sendTargetedNotification(data) {
   const sender = state.currentUser;
   let targetUserIds = [];
 
   if (sender.role === "admin") {
     if (data.targetType === "all") {
-      targetUserIds = db.users.filter((u) => u.id !== "admin").map((u) => u.id);
+      targetUserIds = db.users.map((u) => u.id);
     } else if (data.targetType === "program") {
       targetUserIds = db.users
         .filter(
@@ -959,8 +845,6 @@ function sendTargetedNotification(data) {
       targetUserIds = db.users
         .filter((u) => u.role === "supervisor")
         .map((u) => u.id);
-    } else if (data.targetType === "single_user") {
-      targetUserIds = [data.targetId];
     }
   } else {
     targetUserIds = ["admin"];
@@ -983,7 +867,7 @@ function sendTargetedNotification(data) {
   alert("تم إرسال الإشعار بنجاح.");
 }
 
-// 22. دوال مساعدة
+// 21. دوال مساعدة
 function getUserColor(userId) {
   const user = db.users.find((u) => u.id === userId);
   return user ? user.color || "#169BA2" : "#64748B";
@@ -1023,7 +907,10 @@ function renderNotificationsList() {
   if (!container) return;
 
   const notifs = db.notifications.filter(
-    (n) => n.userId === state.currentUser.id || state.currentRole === "admin",
+    (n) =>
+      n.userId === state.currentUser.id ||
+      n.userId === "all" ||
+      state.currentRole === "admin",
   );
 
   if (notifs.length === 0) {
@@ -1034,14 +921,14 @@ function renderNotificationsList() {
   container.innerHTML = notifs
     .map(
       (n) => `
-        <div class="py-3 flex items-start space-x-3 space-x-reverse ${n.isRead ? "opacity-60" : ""}">
-            <div class="w-8 h-8 rounded-full bg-teal-50 text-[#169BA2] flex items-center justify-center shrink-0 mt-1">
+        <div class="py-2.5 flex items-start space-x-2.5 space-x-reverse ${n.isRead ? "opacity-60" : ""}">
+            <div class="w-7 h-7 rounded-full bg-amber-50 text-[#D4A359] border border-[#D4A359]/30 flex items-center justify-center shrink-0 mt-0.5">
                 <i class="fa-solid fa-bell text-xs"></i>
             </div>
             <div class="flex-1">
                 <div class="text-xs font-bold text-slate-800">${n.title}</div>
-                <div class="text-xs text-slate-500 mt-0.5">${n.message}</div>
-                <div class="text-[10px] text-slate-400 mt-1">${n.date}</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">${n.message}</div>
+                <div class="text-[9px] text-slate-400 mt-0.5">${n.date}</div>
             </div>
         </div>
     `,
@@ -1051,7 +938,11 @@ function renderNotificationsList() {
 
 function markAllNotificationsRead() {
   db.notifications.forEach((n) => {
-    if (n.userId === state.currentUser.id || state.currentRole === "admin") {
+    if (
+      n.userId === state.currentUser.id ||
+      n.userId === "all" ||
+      state.currentRole === "admin"
+    ) {
       n.isRead = true;
     }
   });
@@ -1061,10 +952,12 @@ function markAllNotificationsRead() {
 
 function updateNotificationsBadge() {
   const badge = document.getElementById("notif-badge");
-  if (!badge) return;
+  if (!badge || !state.currentUser) return;
   const unread = db.notifications.filter(
     (n) =>
-      (n.userId === state.currentUser.id || state.currentRole === "admin") &&
+      (n.userId === state.currentUser.id ||
+        n.userId === "all" ||
+        state.currentRole === "admin") &&
       !n.isRead,
   ).length;
   if (unread > 0) {
