@@ -32,7 +32,7 @@
         <div class="flex justify-between h-20 items-center">
           <!-- زر القائمة للجوال + الشعارين والعنوان المعتمد -->
           <div class="flex items-center space-x-3 space-x-reverse">
-            <!-- زر 3 شرطات للجوال (يظهر فقط بعد تسجيل الدخول) -->
+            <!-- زر 3 شرطات للجوال (يظهر بعد تسجيل الدخول فقط) -->
             <button
               id="mobile-menu-btn"
               onclick="toggleMobileSidebar()"
@@ -80,7 +80,7 @@
             id="header-user-controls"
             class="flex items-center space-x-3 sm:space-x-4 space-x-reverse"
           >
-            <!-- زر الانتقال بين المسارات (يظهر بعد تسجيل الدخول فقط) -->
+            <!-- زر الانتقال بين المسارات -->
             <button
               id="header-portal-btn"
               onclick="navigateTo('portal')"
@@ -90,7 +90,7 @@
               <span>تبديل المسار</span>
             </button>
 
-            <!-- مركز التنبيهات (يظهر حصرياً لحساب المدير بعد تسجيل الدخول) -->
+            <!-- مركز التنبيهات (لحساب المدير فقط) -->
             <div id="notif-container" class="relative hidden">
               <button
                 id="notif-btn"
@@ -153,7 +153,7 @@
     <div
       class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 flex flex-col md:flex-row gap-5"
     >
-      <!-- القائمة الجانبية (مخفية قبل تسجيل الدخول وتظهر بعدها مباشرة) -->
+      <!-- القائمة الجانبية (تظهر بعد تسجيل الدخول) -->
       <aside
         id="main-sidebar"
         class="hidden md:hidden fixed md:static top-0 right-0 h-full md:h-fit w-72 md:w-64 bg-white md:rounded-3xl border-l md:border border-slate-200 shadow-2xl md:shadow-sm p-4 shrink-0 z-50 md:z-auto transform translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out overflow-y-auto"
@@ -172,7 +172,7 @@
           </button>
         </div>
         <nav id="sidebar-nav" class="space-y-1">
-          <!-- توليد الروابط والقوائم ديناميكياً بعد تسجيل الدخول -->
+          <!-- يتم توليد القوائم ديناميكياً -->
         </nav>
       </aside>
 
@@ -250,6 +250,10 @@
         </div>
       </div>
     </footer>
+
+    <!-- مكتبات Firebase SDK المعتمدة (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
     <!-- ربط الملفات البرمجية بالترتيب الصحيح -->
     <script src="data.js"></script>
