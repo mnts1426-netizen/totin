@@ -237,3 +237,73 @@ body {
 .sidebar-open {
   transform: translateX(0) !important;
 }
+
+/* ==========================================================================
+   5. تنسيقات بطاقات هوية الطلاب والطباعة (Print Stylesheet)
+   ========================================================================== */
+.student-id-badge {
+  background: #ffffff;
+  border: 2px solid var(--color-gold);
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+@media print {
+  /* إخفاء عناصر التحكم، الأزرار، الهيدر، والقائمة عند الطباعة */
+  header,
+  footer,
+  aside,
+  #sidebar-backdrop,
+  .print-hide,
+  #pwa-install-banner {
+    display: none !important;
+  }
+
+  body,
+  html {
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    height: auto !important;
+  }
+
+  #student-cards-modal {
+    position: static !important;
+    padding: 0 !important;
+    background: transparent !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  #student-cards-modal > div {
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #printable-cards-container {
+    background: transparent !important;
+    padding: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .student-cards-print-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 15px !important;
+    page-break-inside: auto;
+  }
+
+  .student-id-badge {
+    box-shadow: none !important;
+    border: 1.5px solid #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin-bottom: 12px !important;
+  }
+}
