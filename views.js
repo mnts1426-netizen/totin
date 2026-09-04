@@ -1,14 +1,15 @@
 /**
  * views.js - محرك بناء الواجهات الديناميكية المعتمد
  * يتضمن:
- * 1. حصر رصد الحضور للمشرف على برامجه المسندة فقط ومنع أي برامج أخرى.
- * 2. تخصيص إضافة المهام للمشرف بكتابة يدوية مباشرة (إخفاء قائمة الـ 29 معياراً عنه وقصرها على المدير).
- * 3. توحيد مسمى (برنامج) في كافة الواجهات والشاشات.
- * 4. الحفاظ على الطابع الأكاديمي الفاخر وكافة الميزات السابقة.
+ * 1. بطاقات الطلاب الصغيرة القابلة للطباعة المباشرة مع الباركود الأكاديمي.
+ * 2. شريط عائم لتثبيت المنصة كتطبيق (PWA) وتفعيل الإشعارات الفورية بعد الدخول.
+ * 3. شاشة "التحضير السريع والمباشر" المستقلة مع الرصد بالباركود والعمليات الجماعية.
+ * 4. حصر التحضير للمشرف على برامجه المسندة فقط، وتخصيص إدخال المهام له يدوياً (الـ 29 معياراً للمدير فقط).
+ * 5. توحيد مسمى (برنامج) في كامل أرجاء النظام مع الحفاظ على الهوية الأكاديمية الفخمة.
  */
 
 window.views = {
-  // 1. القائمة الجانبية الموجهة بالصلاحيات
+  // 1. القائمة الجانبية الموجهة بالصلاحيات مع إضافة رابط التحضير السريع
   renderSidebar(role) {
     const nav = document.getElementById("sidebar-nav");
     if (!nav) return;
@@ -19,22 +20,28 @@ window.views = {
       links = [
         { id: "home", icon: "fa-house", color: "#D4A359", label: "الرئيسية" },
         {
+          id: "quick-attendance",
+          icon: "fa-qrcode",
+          color: "#169BA2",
+          label: "التحضير السريع (باركود)",
+        },
+        {
           id: "schedule",
           icon: "fa-calendar-week",
           color: "#169BA2",
-          label: "الجدول والتحضير",
+          label: "الجدول والعمليات",
         },
         {
           id: "tasks",
           icon: "fa-list-check",
           color: "#8AA838",
-          label: "المهام والعمليات",
+          label: "المهام والتكليفات",
         },
         {
           id: "students",
           icon: "fa-user-graduate",
           color: "#D4A359",
-          label: "إدارة الطلاب",
+          label: "إدارة الطلاب والبطاقات",
         },
         {
           id: "supervisors",
@@ -70,6 +77,12 @@ window.views = {
           label: "لوحة المتابعة",
         },
         {
+          id: "quick-attendance",
+          icon: "fa-qrcode",
+          color: "#169BA2",
+          label: "التحضير السريع (باركود)",
+        },
+        {
           id: "schedule",
           icon: "fa-calendar-week",
           color: "#169BA2",
@@ -79,13 +92,13 @@ window.views = {
           id: "tasks",
           icon: "fa-tasks",
           color: "#8AA838",
-          label: "مهامي والتكليفات",
+          label: "مهامي المباشرة",
         },
         {
           id: "students",
           icon: "fa-user-graduate",
           color: "#D4A359",
-          label: "إدارة الطلاب",
+          label: "طلابي والبطاقات",
         },
         {
           id: "attendance",
@@ -275,10 +288,37 @@ window.views = {
     }
   },
 
-  // 4. الواجهة الرئيسية
+  // 4. الواجهة الرئيسية مع شريط تثبيت التطبيق وتفعيل الإشعارات
   renderHome(user) {
-    if (user.role === "admin") return this.renderAdminDashboard();
-    if (user.role === "supervisor") return this.renderSupervisorDashboard(user);
+    const installBannerHtml = `
+            <div id="pwa-install-banner" class="bg-gradient-to-r from-[#0B2533] via-[#163a75] to-[#0B2533] rounded-2xl p-4 text-white shadow-md border-r-4 border-r-[#D4A359] flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                <div class="flex items-center space-x-3 space-x-reverse">
+                    <div class="w-10 h-10 rounded-xl bg-white/10 text-[#D4A359] flex items-center justify-center text-lg border border-[#D4A359]/30 shrink-0">
+                        <i class="fa-solid fa-mobile-screen-button"></i>
+                    </div>
+                    <div>
+                        <h4 class="font-black text-sm text-white">تثبيت المنصة كتطبيق على جهازك وتفعيل التنبيهات</h4>
+                        <p class="text-[11px] text-slate-300">قم بتثبيت المنصة كتطبيق سريع ومستقل على جوالك أو جهازك لتلقي التنبيهات والإشعارات فورياً.</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2 space-x-reverse shrink-0">
+                    <button onclick="views.triggerAppInstall()" class="px-3.5 py-1.5 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-xl text-xs transition shadow-xs flex items-center">
+                        <i class="fa-solid fa-download ml-1.5 text-xs"></i> تثبيت التطبيق
+                    </button>
+                    <button onclick="views.requestPushNotification()" class="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs transition border border-white/20 flex items-center">
+                        <i class="fa-solid fa-bell ml-1 text-xs text-[#D4A359]"></i> تفعيل الإشعارات
+                    </button>
+                    <button onclick="document.getElementById('pwa-install-banner').remove()" class="p-1.5 text-slate-400 hover:text-white rounded-lg transition" title="إغلاق">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+
+    if (user.role === "admin")
+      return `<div class="space-y-4 sm:space-y-6">${installBannerHtml}${this.renderAdminDashboard()}</div>`;
+    if (user.role === "supervisor")
+      return `<div class="space-y-4 sm:space-y-6">${installBannerHtml}${this.renderSupervisorDashboard(user)}</div>`;
 
     // واجهة الطالب
     const currentProg =
@@ -290,6 +330,8 @@ window.views = {
 
     return `
             <div class="space-y-4 sm:space-y-6">
+                ${installBannerHtml}
+
                 <div class="bg-gradient-to-r from-[#0B2533] to-[#2B1736] rounded-3xl p-5 sm:p-6 text-white shadow-sm relative overflow-hidden border-t-4 border-t-[#D4A359]">
                     <div class="relative z-10 flex flex-col md:flex-row justify-between md:items-center gap-3">
                         <div>
@@ -333,6 +375,43 @@ window.views = {
                 ${this.renderScheduleWidget(currentProg.id)}
             </div>
         `;
+  },
+
+  // دوال مساعدة لشريط التثبيت والتنبيهات
+  triggerAppInstall() {
+    if (window.deferredPrompt) {
+      window.deferredPrompt.prompt();
+      window.deferredPrompt.userChoice.then((choiceResult) => {
+        if (choiceResult.outcome === "accepted") {
+          alert("تم بدء تثبيت المنصة كتطبيق على جهازك بنجاح.");
+        }
+        window.deferredPrompt = null;
+      });
+    } else {
+      alert(
+        'لتثبيت التطبيق على جهازك:\n- على جوال آيفون: اضغط زر المشاركة (Share) ثم اختر "إضافة إلى الصفحة الرئيسية (Add to Home Screen)".\n- على أندرويد والكمبيوتر: اضغط على زر خيارات المتصفح (⋮) واختر "تثبيت التطبيق (Install App)".',
+      );
+    }
+  },
+
+  requestPushNotification() {
+    if (!("Notification" in window)) {
+      alert("متصفحك لا يدعم الإشعارات الفورية.");
+      return;
+    }
+    Notification.requestPermission().then((permission) => {
+      if (permission === "granted") {
+        alert(
+          "تم تفعيل الإشعارات الفورية بنجاح! ستصلك التنبيهات حتى عند إغلاق التطبيق.",
+        );
+        new Notification("المنصة الالكترونية", {
+          body: "تم تفعيل نظام الإشعارات الفورية لحسابك بنجاح.",
+          icon: "logo15.png",
+        });
+      } else {
+        alert("تم رفض إذن الإشعارات، يمكنك إعادة تفعيلها من إعدادات المتصفح.");
+      }
+    });
   },
 
   // 5. لوحة الإدارة العامة
@@ -834,7 +913,7 @@ window.views = {
     document.body.insertAdjacentHTML("beforeend", modalHtml);
   },
 
-  // 9. إضافة وتكليف مهمة جديدة (قائمة الـ 29 للمدير فقط / إدخال يدوي مباشر للمشرف)
+  // 9. إضافة مهمة جديدة: قائمة الـ 29 معيار للمدير فقط، وإدخال يدوي مباشر للمشرف
   openAddTaskModal(defaultProgramId) {
     const user = state.currentUser;
     const isAdmin = user.role === "admin";
@@ -865,7 +944,7 @@ window.views = {
                           isAdmin
                             ? `
                             <div>
-                                <label class="block font-bold text-slate-700 mb-1">اختر المهمة من قائمة المعايير (29 معيار):</label>
+                                <label class="block font-bold text-slate-700 mb-1">اختر المهمة من قائمة المعايير المعتمدة (29 معيار):</label>
                                 <select id="task-template-select" onchange="views.handleTemplateSelectChange(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                                     <option value="">-- اختر من قائمة المهام المعتمدة --</option>
                                     <option value="__CUSTOM__">✍️ مهمة أخرى (إدخال يدوي مخصص)</option>
@@ -886,8 +965,8 @@ window.views = {
                         `
                             : `
                             <div>
-                                <label class="block font-bold text-slate-700 mb-1">عنوان المهمة (كتابة يدوية):</label>
-                                <input id="new-task-title" required class="w-full bg-white border-2 border-[#D4A359] rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none" placeholder="اكتب نص المهمة هنا...">
+                                <label class="block font-bold text-slate-700 mb-1">عنوان المهمة المطلوب تنفيذها:</label>
+                                <input id="new-task-title" required class="w-full bg-white border-2 border-[#D4A359] rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none" placeholder="اكتب نص المهمة بدقة هنا...">
                             </div>
                         `
                         }
@@ -1057,7 +1136,233 @@ window.views = {
     });
   },
 
-  // 10. شاشة إدارة الطلاب
+  // 10. شاشة التحضير السريع المستقلة (Dedicated Fast Attendance with Barcode Reader)
+  renderQuickAttendanceView() {
+    const user = state.currentUser;
+    const isSupervisor = user.role === "supervisor";
+    const availablePrograms = isSupervisor
+      ? db.programs.filter((p) => (user.assignedPrograms || []).includes(p.id))
+      : db.programs;
+
+    const currentProgId =
+      state.currentProgramId &&
+      availablePrograms.some((p) => p.id === state.currentProgramId)
+        ? state.currentProgramId
+        : availablePrograms[0]
+          ? availablePrograms[0].id
+          : "prog_taseel";
+
+    const activeSchedule =
+      db.schedules.find(
+        (s) => s.programId === currentProgId && s.requiresAttendance,
+      ) || db.schedules[0];
+    const scheduleId = activeSchedule ? activeSchedule.id : "sch_ts_1";
+
+    const students = db.users.filter(
+      (u) =>
+        u.role === "student" &&
+        u.currentProgramId === currentProgId &&
+        !u.isRestricted,
+    );
+
+    let presentCount = 0,
+      absentCount = 0,
+      lateCount = 0,
+      excusedCount = 0,
+      unmarkedCount = 0;
+    students.forEach((st) => {
+      const status = getStudentAttendanceStatus(scheduleId, st.id);
+      if (status === "حاضر") presentCount++;
+      else if (status === "غائب") absentCount++;
+      else if (status === "متأخر") lateCount++;
+      else if (status === "مستأذن") excusedCount++;
+      else unmarkedCount++;
+    });
+
+    return `
+            <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-5 border-t-4 border-t-[#D4A359]">
+                
+                <!-- رأس شاشة التحضير المباشر -->
+                <div class="flex flex-col md:flex-row justify-between md:items-center gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-black text-[#0B2533] flex items-center">
+                            <i class="fa-solid fa-qrcode text-[#D4A359] ml-2 text-xl"></i> التحضير السريع والمباشر للطلاب
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-1">الرصد الفوري عبر تمرير قارئ الباركود أو تحديد الحالات جماعياً بنقرة واحدة</p>
+                    </div>
+
+                    <div class="flex items-center space-x-2 space-x-reverse flex-wrap gap-y-2">
+                        <select onchange="state.currentProgramId = this.value; navigateTo('quick-attendance');" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-[#0B2533] focus:border-[#D4A359]">
+                            ${availablePrograms.map((p) => `<option value="${p.id}" ${p.id === currentProgId ? "selected" : ""}>برنامج ${p.name}</option>`).join("")}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- خانة الماسح الضوئي وقارئ الباركود الذكي -->
+                <div class="bg-gradient-to-r from-slate-900 to-[#0B2533] rounded-2xl p-4 text-white shadow-sm border border-[#D4A359]/40 space-y-3">
+                    <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                        <label class="font-black text-xs sm:text-sm text-[#D4A359] flex items-center">
+                            <i class="fa-solid fa-barcode ml-2 text-base"></i> مسح باركود بطاقة الطالب (يدعم أجهزة الـ USB وكاميرا الجوال):
+                        </label>
+                        <span id="barcode-scan-feedback" class="text-[11px] font-bold text-emerald-400">جاهز لاستقبال مسح الأكواد...</span>
+                    </div>
+
+                    <div class="relative">
+                        <input id="barcode-quick-input" 
+                               autofocus 
+                               onkeydown="if(event.key === 'Enter') { views.processBarcodeScan(this.value, '${scheduleId}'); this.value = ''; }"
+                               placeholder="مرر كود بطاقة الطالب هنا أو اكتب الرقم الأكاديمي واضغط Enter..." 
+                               class="w-full bg-white text-[#0B2533] font-black text-sm px-4 py-3 rounded-xl border-2 border-[#D4A359] focus:outline-none shadow-inner placeholder:font-normal placeholder:text-slate-400">
+                        <button onclick="const val = document.getElementById('barcode-quick-input').value; views.processBarcodeScan(val, '${scheduleId}'); document.getElementById('barcode-quick-input').value = '';" 
+                                class="absolute left-2 top-2 bottom-2 px-4 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-lg text-xs transition">
+                            تحضير
+                        </button>
+                    </div>
+                </div>
+
+                <!-- بطاقات إحصائيات الجلسة الحالية -->
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                    <div class="kpi-card text-center p-3">
+                        <div class="text-[10px] text-slate-500 font-bold">العدد الكلي</div>
+                        <div class="text-xl font-black text-[#0B2533] mt-0.5">${students.length}</div>
+                    </div>
+                    <div class="kpi-card text-center p-3 border-emerald-300">
+                        <div class="text-[10px] text-emerald-700 font-bold">حاضر ✓</div>
+                        <div class="text-xl font-black text-emerald-600 mt-0.5">${presentCount}</div>
+                    </div>
+                    <div class="kpi-card text-center p-3 border-rose-300">
+                        <div class="text-[10px] text-rose-700 font-bold">غائب ✗</div>
+                        <div class="text-xl font-black text-rose-600 mt-0.5">${absentCount}</div>
+                    </div>
+                    <div class="kpi-card text-center p-3 border-amber-300">
+                        <div class="text-[10px] text-amber-700 font-bold">متأخر ⏱</div>
+                        <div class="text-xl font-black text-amber-600 mt-0.5">${lateCount}</div>
+                    </div>
+                    <div class="kpi-card text-center p-3 border-sky-300">
+                        <div class="text-[10px] text-sky-700 font-bold">مستأذن ✉</div>
+                        <div class="text-xl font-black text-sky-600 mt-0.5">${excusedCount}</div>
+                    </div>
+                </div>
+
+                <!-- شريط العمليات الجماعية للتحضير الفوري -->
+                <div class="bg-teal-50/70 border border-teal-200/80 p-3 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                    <label class="flex items-center space-x-2 space-x-reverse font-bold text-slate-800 text-xs cursor-pointer">
+                        <input type="checkbox" id="select-all-fast-att" onchange="document.querySelectorAll('.fast-stu-checkbox').forEach(cb => cb.checked = this.checked)" class="accent-[#0B2533]">
+                        <span>تحديد جميع الطلاب المعروضين (${students.length})</span>
+                    </label>
+
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                        <button onclick="views.bulkRecordQuickAttendance('${scheduleId}', 'حاضر')" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-xs transition">
+                            ✓ تحضير المحددين حاضر
+                        </button>
+                        <button onclick="views.bulkRecordQuickAttendance('${scheduleId}', 'غائب')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs shadow-xs transition">
+                            ✗ رصد كـ غائب
+                        </button>
+                        <button onclick="views.bulkRecordQuickAttendance('${scheduleId}', 'متأخر')" class="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs shadow-xs transition">
+                            ⏱ متأخر
+                        </button>
+                        <button onclick="views.bulkRecordQuickAttendance('${scheduleId}', 'مستأذن')" class="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold text-xs shadow-xs transition">
+                            ✉ مستأذن
+                        </button>
+                        <button onclick="markRemainingAbsent('${scheduleId}'); navigateTo('quick-attendance');" class="px-3 py-1.5 bg-slate-800 hover:bg-black text-[#D4A359] font-bold rounded-xl text-xs transition">
+                            احتساب البقية غائبين
+                        </button>
+                    </div>
+                </div>
+
+                <!-- قائمة الطلاب مع أزرار الرصد المباشر -->
+                <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                    ${students
+                      .map((st) => {
+                        const status = getStudentAttendanceStatus(
+                          scheduleId,
+                          st.id,
+                        );
+                        return `
+                            <div class="p-3 bg-white rounded-2xl border border-slate-200 hover:border-[#D4A359] transition flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                                <div class="flex items-center space-x-3 space-x-reverse">
+                                    <input type="checkbox" value="${st.id}" class="fast-stu-checkbox accent-[#0B2533]">
+                                    <div class="w-8 h-8 rounded-xl bg-[#0B2533] text-[#D4A359] font-bold flex items-center justify-center text-xs shrink-0 border border-[#D4A359]/30">
+                                        ${st.avatar}
+                                    </div>
+                                    <div>
+                                        <div class="font-black text-slate-800 text-xs sm:text-sm">${st.name}</div>
+                                        <div class="text-[10px] text-slate-400 font-mono">${st.studentNumber} | جوال الأب: ${st.fatherPhone || "غير مسجل"}</div>
+                                    </div>
+                                </div>
+
+                                <!-- كبسولات تغيير الحالة المباشرة بضغطة واحدة -->
+                                <div class="flex items-center gap-1">
+                                    <button onclick="recordAttendance('${scheduleId}', '${st.id}', 'حاضر'); navigateTo('quick-attendance');" 
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold transition border ${status === "حاضر" ? "bg-emerald-600 text-white border-emerald-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-emerald-50"}">
+                                        حاضر ✓
+                                    </button>
+                                    <button onclick="recordAttendance('${scheduleId}', '${st.id}', 'غائب'); navigateTo('quick-attendance');" 
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold transition border ${status === "غائب" ? "bg-rose-600 text-white border-rose-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-rose-50"}">
+                                        غائب ✗
+                                    </button>
+                                    <button onclick="recordAttendance('${scheduleId}', '${st.id}', 'متأخر'); navigateTo('quick-attendance');" 
+                                            class="px-2 py-1 rounded-lg text-xs font-bold transition border ${status === "متأخر" ? "bg-amber-600 text-white border-amber-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-amber-50"}">
+                                        متأخر ⏱
+                                    </button>
+                                    <button onclick="recordAttendance('${scheduleId}', '${st.id}', 'مستأذن'); navigateTo('quick-attendance');" 
+                                            class="px-2 py-1 rounded-lg text-xs font-bold transition border ${status === "مستأذن" ? "bg-sky-600 text-white border-sky-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-sky-50"}">
+                                        مستأذن ✉
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                      })
+                      .join("")}
+                </div>
+
+            </div>
+        `;
+  },
+
+  // معالجة مسح الباركود السريع
+  processBarcodeScan(scannedCode, scheduleId) {
+    if (!scannedCode || scannedCode.trim() === "") return;
+    const code = scannedCode.trim();
+
+    const student = db.users.find(
+      (u) =>
+        u.role === "student" &&
+        (u.studentNumber === code || u.phone === code || u.id === code),
+    );
+
+    const feedback = document.getElementById("barcode-scan-feedback");
+    if (!student) {
+      if (feedback) {
+        feedback.innerText = `لم يتم العثور على طالب بالكود: ${code} ❌`;
+        feedback.className = "text-[11px] font-bold text-rose-400";
+      }
+      alert(`لم يتم العثور على طالب يطابق الرقم: ${code}`);
+      return;
+    }
+
+    recordAttendance(scheduleId, student.id, "حاضر");
+    if (feedback) {
+      feedback.innerText = `تم رصد حضور الطالب: ${student.name} بنجاح ✓`;
+      feedback.className = "text-[11px] font-bold text-emerald-400";
+    }
+    navigateTo("quick-attendance");
+  },
+
+  bulkRecordQuickAttendance(scheduleId, status) {
+    const selected = document.querySelectorAll(".fast-stu-checkbox:checked");
+    if (selected.length === 0) {
+      alert("يرجى تحديد طالب واحد على الأقل من القائمة للرصد الجماعي!");
+      return;
+    }
+    selected.forEach((cb) => {
+      recordAttendance(scheduleId, cb.value, status);
+    });
+    alert(`تم رصد حالة (${status}) لعدد (${selected.length}) طالب بنجاح.`);
+    navigateTo("quick-attendance");
+  },
+
+  // 11. شاشة إدارة الطلاب مع زر طباعة البطاقات المصغرة
   renderAdminStudentsView() {
     const user = state.currentUser;
     const isSupervisor = user.role === "supervisor";
@@ -1077,17 +1382,20 @@ window.views = {
                 <div class="flex flex-col md:flex-row justify-between md:items-center gap-3 border-b border-slate-100 pb-3.5">
                     <div>
                         <h2 class="text-lg sm:text-xl font-extrabold text-[#0B2533] flex items-center">
-                            <i class="fa-solid fa-user-graduate text-[#D4A359] ml-2"></i> إدارة الطلاب
+                            <i class="fa-solid fa-user-graduate text-[#D4A359] ml-2"></i> إدارة الطلاب والبطاقات الأكاديمية
                         </h2>
                     </div>
 
                     <div class="flex items-center space-x-2 space-x-reverse flex-wrap gap-y-2">
+                        <button onclick="views.openStudentCardsModal()" class="px-3.5 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white text-xs font-black rounded-xl transition shadow-xs flex items-center border border-[#D4A359]">
+                            <i class="fa-solid fa-id-card ml-1.5 text-[#D4A359]"></i> طباعة بطاقات الطلاب (باركود)
+                        </button>
                         <label class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center cursor-pointer">
                             <i class="fa-solid fa-file-excel ml-1"></i> استيراد من Excel / CSV
                             <input type="file" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleStudentExcelImport(event)">
                         </label>
-                        <button onclick="views.openAddStudentModal()" class="px-3 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center">
-                            <i class="fa-solid fa-user-plus ml-1 text-[#D4A359]"></i> إضافة طالب
+                        <button onclick="views.openAddStudentModal()" class="px-3 py-1.5 bg-[#169BA2] hover:bg-[#128086] text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center">
+                            <i class="fa-solid fa-user-plus ml-1"></i> إضافة طالب
                         </button>
                     </div>
                 </div>
@@ -1095,7 +1403,7 @@ window.views = {
                 <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center gap-2.5">
                     <div class="relative flex-1 w-full">
                         <i class="fa-solid fa-magnifying-glass absolute right-3 top-2.5 text-slate-400 text-xs"></i>
-                        <input id="student-search-input" onkeyup="views.filterStudentsList(this.value)" class="w-full bg-white border border-slate-200 rounded-xl pr-8 pl-3 py-1.5 text-xs font-medium focus:outline-none focus:border-[#D4A359]" placeholder="ابحث باسم الطالب أو رقم الجوال...">
+                        <input id="student-search-input" onkeyup="views.filterStudentsList(this.value)" class="w-full bg-white border border-slate-200 rounded-xl pr-8 pl-3 py-1.5 text-xs font-medium focus:outline-none focus:border-[#D4A359]" placeholder="ابحث باسم الطالب أو رقم الجوال أو الرقم الأكاديمي...">
                     </div>
 
                     <div class="flex items-center space-x-2 space-x-reverse w-full sm:w-auto">
@@ -1151,6 +1459,7 @@ window.views = {
                                         ${st.isRestricted ? '<span class="badge badge-restricted text-[9px]">مقيد</span>' : ""}
                                     </div>
                                     <div class="text-[11px] text-slate-500 mt-0.5">
+                                        <span class="font-mono text-[#D4A359] font-bold">${st.studentNumber}</span> | 
                                         <span>جوال: ${st.phone || "غير مسجل"}</span> | 
                                         <span class="text-[#0B2533] font-bold">برنامج ${getProgramName(st.currentProgramId)}</span>
                                     </div>
@@ -1158,6 +1467,9 @@ window.views = {
                             </div>
 
                             <div class="flex items-center space-x-1.5 space-x-reverse flex-wrap gap-y-1.5">
+                                <button onclick="views.openSingleStudentCardPrint('${st.id}')" class="px-2.5 py-1 bg-slate-100 hover:bg-[#D4A359] hover:text-[#0B2533] text-slate-700 rounded-xl text-xs font-bold transition flex items-center">
+                                    <i class="fa-solid fa-id-card ml-1"></i> البطاقة
+                                </button>
                                 <button onclick="views.openStudentDetailsModal('${st.id}')" class="px-2.5 py-1 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white rounded-xl text-xs font-bold transition">
                                     معلومات الطالب
                                 </button>
@@ -1180,6 +1492,134 @@ window.views = {
         `;
   },
 
+  // 12. نافذة طباعة بطاقات الطلاب الأكاديمية المصغرة (ID Badges with Barcode)
+  openStudentCardsModal() {
+    const students = db.users.filter(
+      (u) => u.role === "student" && !u.isRestricted,
+    );
+
+    const modalHtml = `
+            <div id="student-cards-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex justify-center items-start pt-10 px-4 overflow-y-auto">
+                <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-4xl w-full overflow-hidden my-6">
+                    
+                    <div class="bg-[#0B2533] text-white p-5 flex justify-between items-center border-b border-[#D4A359] print-hide">
+                        <div>
+                            <h3 class="font-black text-base sm:text-lg flex items-center">
+                                <i class="fa-solid fa-id-card text-[#D4A359] ml-2"></i> بطاقات هوية الطلاب للطباعة المباشرة (مع الباركود)
+                            </h3>
+                            <p class="text-xs text-slate-300 mt-0.5">بطاقات مصغرة قياسية يمكن مسحها ضوئياً عبر أجهزة الـ USB عند التحضير</p>
+                        </div>
+                        <div class="flex items-center space-x-2 space-x-reverse">
+                            <button onclick="window.print()" class="px-4 py-2 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-xl text-xs transition shadow-sm flex items-center">
+                                <i class="fa-solid fa-print ml-1.5 text-sm"></i> طباعة البطاقات الآن
+                            </button>
+                            <button onclick="closeModal('student-cards-modal')" class="text-slate-300 hover:text-white text-xl mr-2">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="p-6 bg-slate-100 max-h-[75vh] overflow-y-auto" id="printable-cards-container">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 student-cards-print-grid">
+                            ${students.map((st) => views.buildStudentBadgeHtml(st)).join("")}
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        `;
+
+    document.body.insertAdjacentHTML("beforeend", modalHtml);
+  },
+
+  // طباعة بطاقة لطالب واحد منفرد
+  openSingleStudentCardPrint(studentId) {
+    const student = db.users.find((u) => u.id === studentId);
+    if (!student) return;
+
+    const modalHtml = `
+            <div id="single-card-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+                <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden p-6 text-center space-y-4">
+                    <div class="flex justify-between items-center pb-2 border-b border-slate-100 print-hide">
+                        <span class="font-black text-sm text-[#0B2533]">معاينة بطاقة الطالب</span>
+                        <button onclick="closeModal('single-card-modal')" class="text-slate-400 hover:text-slate-700"><i class="fa-solid fa-xmark text-lg"></i></button>
+                    </div>
+
+                    <div id="printable-cards-container" class="flex justify-center">
+                        ${views.buildStudentBadgeHtml(student)}
+                    </div>
+
+                    <div class="flex justify-center space-x-2 space-x-reverse pt-2 print-hide">
+                        <button onclick="window.print()" class="px-5 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-black rounded-xl text-xs transition">
+                            <i class="fa-solid fa-print ml-1.5"></i> طباعة البطاقة
+                        </button>
+                        <button onclick="closeModal('single-card-modal')" class="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs">
+                            إغلاق
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+    document.body.insertAdjacentHTML("beforeend", modalHtml);
+  },
+
+  // بناء قالب البطاقة المصغرة الفاخرة مع الباركود
+  buildStudentBadgeHtml(student) {
+    const program =
+      db.programs.find((p) => p.id === student.currentProgramId) || {};
+    return `
+            <div class="student-id-badge bg-white rounded-2xl border-2 border-[#D4A359] p-3.5 shadow-sm text-right flex flex-col justify-between relative overflow-hidden" style="width: 100%; max-width: 330px; height: 195px; margin: 0 auto;">
+                
+                <!-- الشريط التذهيبي العلوي والشعارات -->
+                <div class="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <div class="flex items-center space-x-1.5 space-x-reverse">
+                        <img src="logo15.png" alt="مشكاة" class="h-6 w-auto object-contain" onerror="this.style.display='none'">
+                        <div class="h-4 w-px bg-slate-200 mx-1"></div>
+                        <img src="logo16.png" alt="توطين" class="h-7 w-auto object-contain" onerror="this.style.display='none'">
+                    </div>
+                    <span class="text-[9px] font-black text-[#0B2533] bg-amber-50 border border-[#D4A359]/40 px-2 py-0.5 rounded-full">
+                        برنامج ${program.name || "العلمي"}
+                    </span>
+                </div>
+
+                <!-- معلومات الطالب -->
+                <div class="flex items-center space-x-2.5 space-x-reverse py-1">
+                    <div class="w-10 h-10 rounded-xl bg-[#0B2533] text-[#D4A359] font-black flex items-center justify-center text-xs shrink-0 border border-[#D4A359]/40">
+                        ${student.avatar}
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <div class="text-xs font-black text-[#0B2533] truncate">${student.name}</div>
+                        <div class="text-[10px] font-bold text-slate-500 font-mono mt-0.5">الرقم: ${student.studentNumber}</div>
+                    </div>
+                </div>
+
+                <!-- تمثيل الباركود الأكاديمي القابل للقراءة بأجهزة الـ USB -->
+                <div class="bg-slate-50 p-1.5 rounded-xl border border-slate-200 text-center flex flex-col items-center justify-center">
+                    <div class="barcode-lines flex items-center justify-center space-x-[2.5px] space-x-reverse h-7 w-full max-w-[200px] overflow-hidden">
+                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[1px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[3px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[1.5px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[4px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[1px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[2.5px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[1.5px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[3px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[1px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[3.5px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[1.5px] h-full inline-block"></span>
+                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
+                    </div>
+                    <span class="text-[9px] font-black text-slate-700 font-mono tracking-wider mt-0.5">${student.studentNumber}</span>
+                </div>
+
+            </div>
+        `;
+  },
+
   filterStudentsList(query) {
     const container = document.getElementById("students-cards-container");
     if (!container) return;
@@ -1191,7 +1631,7 @@ window.views = {
     });
   },
 
-  // 11. معلومات الطالب
+  // 13. تفاصيل الطالب
   openStudentDetailsModal(studentId) {
     const student = db.users.find((u) => u.id === studentId);
     if (!student) return;
@@ -1252,7 +1692,7 @@ window.views = {
     document.body.insertAdjacentHTML("beforeend", modalHtml);
   },
 
-  // 12. تعديل طالب
+  // 14. تعديل بيانات طالب
   openEditStudentModal(studentId) {
     const student = db.users.find((u) => u.id === studentId);
     if (!student) return;
@@ -1325,7 +1765,7 @@ window.views = {
     });
   },
 
-  // 13. إضافة طالب يدوياً
+  // 15. إضافة طالب يدوياً
   openAddStudentModal() {
     const modalHtml = `
             <div id="add-student-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
@@ -1361,7 +1801,7 @@ window.views = {
                             </select>
                         </div>
 
-                        <div pt-2 flex justify-end space-x-2 space-x-reverse>
+                        <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
                             <button type="button" onclick="closeModal('add-student-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
                             <button type="submit" class="px-4 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl transition shadow-xs">حفظ واعتماد</button>
                         </div>
@@ -1382,7 +1822,7 @@ window.views = {
     addNewStudent({ name, phone, fatherPhone, currentProgramId });
   },
 
-  // 14. شاشة إدارة المشرفين
+  // 16. إدارة المشرفين
   renderAdminSupervisorsView() {
     const supervisors = db.users.filter((u) => u.role === "supervisor");
 
@@ -1513,7 +1953,7 @@ window.views = {
     addNewSupervisor({ name, phone, assignedPrograms });
   },
 
-  // 15. مودال التحضير الذكي (التحضير المتعدد والغياب التلقائي للبقية)
+  // 17. مودال التحضير بالجداول التقليدي
   openAttendanceModal(scheduleId) {
     const schedule = db.schedules.find((s) => s.id === scheduleId);
     if (!schedule) return;
@@ -1566,7 +2006,6 @@ window.views = {
                             </div>
                         </div>
 
-                        <!-- شريط التحضير الجماعي السريع -->
                         <div class="bg-teal-50/60 border border-teal-200/80 p-2.5 rounded-2xl space-y-2">
                             <div class="flex items-center justify-between">
                                 <label class="flex items-center space-x-1.5 space-x-reverse font-bold text-slate-700 cursor-pointer">
@@ -1656,7 +2095,7 @@ window.views = {
     }
   },
 
-  // 16. الإعدادات
+  // 18. الإعدادات
   renderSettingsView() {
     const user = state.currentUser;
     const isStudent = user.role === "student";
@@ -1693,7 +2132,7 @@ window.views = {
         `;
   },
 
-  // 17. إرسال الإشعارات
+  // 19. إرسال الإشعارات
   openSendNotifModal() {
     const user = state.currentUser;
     const isAdmin = user.role === "admin";
@@ -1772,7 +2211,7 @@ window.views = {
     });
   },
 
-  // 18. لوحة المشرف
+  // 20. لوحة المشرف
   renderSupervisorDashboard(supervisor) {
     const visibleTasks = getVisibleTasks(supervisor);
     const myTasks = visibleTasks.filter((t) => t.assignedTo === supervisor.id);
@@ -1822,7 +2261,7 @@ window.views = {
         `;
   },
 
-  // 19. سجلات التحضير (مقيدة للمشرف ببرامجه فقط)
+  // 21. سجلات التحضير (مقيدة للمشرف ببرامجه فقط)
   renderAttendanceManagementView() {
     const user = state.currentUser;
     const isSupervisor = user.role === "supervisor";
@@ -1876,7 +2315,7 @@ window.views = {
         `;
   },
 
-  // 20. مركز المهام
+  // 22. مركز المهام
   renderTasksView(user) {
     const tasksList = getVisibleTasks(user);
 
@@ -1925,7 +2364,7 @@ window.views = {
         `;
   },
 
-  // 21. لوحة الإعلانات
+  // 23. لوحة الإعلانات
   renderAnnouncementsView() {
     const announcements = db.announcements || [];
     const canPublish =
@@ -1974,7 +2413,7 @@ window.views = {
         `;
   },
 
-  // 22. نافذة إضافة إعلان
+  // 24. إضافة إعلان جديد
   openAddAnnouncementModal() {
     const modalHtml = `
             <div id="add-announcement-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
