@@ -1,7 +1,11 @@
 /**
  * app.js - محرك المنصة الرئيسي وإدارة العمليات الشاملة
- * يدعم: إظهار التنبيهات للجميع فور تسجيل الدخول، توحيد مسمى (برنامج)،
- * إظهار القائمة الجانبية بالكامل، استيراد Excel، والتحضير الجماعي التلقائي.
+ * يدعم:
+ * 1. شاشة التحضير السريع المستقلة (quick-attendance) ودعم مسح الباركود الفوري.
+ * 2. تفعيل الإشعارات لجميع المستخدمين فور تسجيل الدخول.
+ * 3. حصر صلاحيات المشرف على برامجه المسندة فقط في التحضير والمهام.
+ * 4. دعم التقاط تثبيت التطبيق المستقل (PWA).
+ * 5. توحيد مسمى (برنامج) في كامل رسائل وتنبيهات النظام.
  */
 
 const state = {
@@ -12,6 +16,12 @@ const state = {
   currentProgramId: "prog_taseel",
   scheduleViewMode: "stacked",
 };
+
+// التقاط حدث تثبيت التطبيق PWA
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  window.deferredPrompt = e;
+});
 
 // 1. التهيئة للبدء في شاشة البوابة
 function initApp() {
@@ -203,6 +213,11 @@ function navigateTo(viewName) {
         ? window.views.renderHome(state.currentUser)
         : window.views.renderPortalView();
       break;
+    case "quick-attendance":
+      contentArea.innerHTML = window.views.renderQuickAttendanceView
+        ? window.views.renderQuickAttendanceView()
+        : window.views.renderHome(state.currentUser);
+      break;
     case "schedule":
       contentArea.innerHTML = window.views.renderScheduleWidget(
         state.currentProgramId,
@@ -386,8 +401,9 @@ function markRemainingAbsent(scheduleId) {
   });
 
   alert(`تم احتساب (${markedCount}) طالب كـ (غائب) تلقائياً.`);
-  views.updateAttendanceModalView(scheduleId);
-  views.openAttendanceModal(scheduleId);
+  if (window.views && window.views.updateAttendanceModalView) {
+    views.updateAttendanceModalView(scheduleId);
+  }
 }
 
 // 8. تزامن التواريخ الهجرية والميلادية
