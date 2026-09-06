@@ -1,6 +1,9 @@
 /**
- * data.js - قاعدة البيانات وتهيئة الربط السحابي مع Firebase Firestore
+ * data.js - قاعدة البيانات الأولية (البذور) وتهيئة الربط السحابي مع Firebase Firestore
  * المشروع: toti-ae62c
+ *
+ * ملاحظة: البيانات هنا هي "القيم الافتراضية" فقط. الحفظ والمزامنة الفعلية تتم عبر store.js
+ * (تخزين محلي localStorage دائماً + مزامنة سحابية Firestore عند توفر الاتصال).
  */
 
 // تهيئة إعدادات Firebase الخاصة بمشروعك
@@ -15,13 +18,17 @@ const firebaseConfig = {
 };
 
 // تشغيل Firebase وربط Firestore
-if (typeof firebase !== "undefined" && !firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-  window.dbFirestore = firebase.firestore();
+try {
+  if (typeof firebase !== "undefined" && !firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+    window.dbFirestore = firebase.firestore();
+  }
+} catch (e) {
+  console.warn("تعذر تهيئة Firebase:", e);
 }
 
 window.db = {
-  // 1. قائمة المعايير والمهام الـ 29 المعتمدة كقوالب جاهزة للتكليف[cite: 18]
+  // 1. قائمة المعايير والمهام الـ 29 المعتمدة كقوالب جاهزة للتكليف
   taskTemplates: [
     "أن يقوم مسؤول شؤون الطلاب بنفسه بالتحضير الأسبوعي",
     "أن يتضمن التحضير الأسبوعي فرز لنوع الغياب (بعذر / بدون عذر)",
@@ -54,7 +61,7 @@ window.db = {
     "أن يتم رصد مدى رضا الطلاب عن الدرس الأسبوعي",
   ],
 
-  // 2. برامج المنصة الأساسية (بدون ال التعريف)[cite: 18]
+  // 2. برامج المنصة الأساسية - تأصيل ورسوخ مغلقان حالياً (isClosed) ولا يتم العمل عليهما
   programs: [
     {
       id: "prog_taheel",
@@ -67,16 +74,18 @@ window.db = {
       name: "تأصيل",
       color: "#0B2533",
       levelsCount: 3,
+      isClosed: true,
     },
     {
       id: "prog_rasookh",
       name: "رسوخ",
       color: "#D4A359",
       levelsCount: 2,
+      isClosed: true,
     },
   ],
 
-  // 3. مستويات البرامج[cite: 18]
+  // 3. مستويات البرامج
   levels: [
     {
       id: "lvl_th_1",
@@ -122,299 +131,48 @@ window.db = {
     },
   ],
 
-  // 4. المجموعات الدراسية[cite: 18]
+  // 4. المجموعات الدراسية
   groups: [
-    {
-      id: "grp_ts_101",
-      levelId: "lvl_ts_1",
-      programId: "prog_taseel",
-      name: "مجموعة الخليل بن أحمد",
-      supervisorId: "supervisor_1",
-    },
-    {
-      id: "grp_rs_201",
-      levelId: "lvl_rs_1",
-      programId: "prog_rasookh",
-      name: "مجموعة الشاطبي المتقدمة",
-      supervisorId: "supervisor_1",
-    },
     {
       id: "grp_th_001",
       levelId: "lvl_th_1",
       programId: "prog_taheel",
-      name: "مجموعة البخاري التأسيسية",
-      supervisorId: "supervisor_2",
-    },
-    {
-      id: "grp_ts_102",
-      levelId: "lvl_ts_1",
-      programId: "prog_taseel",
-      name: "مجموعة سيبويه التأصيلية",
-      supervisorId: "supervisor_3",
+      name: "المجموعة الأولى - تأهيل",
+      supervisorId: null,
     },
   ],
 
-  // 5. المستخدمين والحسابات[cite: 18]
+  // 5. المستخدمون والحسابات - حساب المدير فقط (كل الحسابات الوهمية حُذفت)
+  //    تُضاف بقية الحسابات من داخل التطبيق. كلمة المرور الافتراضية للجميع: 1234
   users: [
     {
       id: "admin",
-      name: "إدارة المنصة المركزية",
+      name: "مدير المنصة",
       role: "admin",
       phone: "0500000000",
+      nationalId: "1000000000",
       password: "1234",
-      email: "admin@alelm.edu.sa",
-      avatar: "إد",
+      email: "admin@totin.sa",
+      avatar: "مد",
       color: "#0B2533",
       isRestricted: false,
     },
-    {
-      id: "supervisor_1",
-      name: "أ. أحمد الميموني",
-      role: "supervisor",
-      phone: "0551112233",
-      password: "1234",
-      email: "ahmed@alelm.edu.sa",
-      avatar: "أح",
-      color: "#169BA2",
-      assignedPrograms: ["prog_taseel", "prog_rasookh"],
-      assignedGroups: ["grp_ts_101", "grp_rs_201"],
-      isRestricted: false,
-    },
-    {
-      id: "supervisor_2",
-      name: "أ. فيصل السعيد",
-      role: "supervisor",
-      phone: "0554445566",
-      password: "1234",
-      email: "faisal@alelm.edu.sa",
-      avatar: "في",
-      color: "#E59824",
-      assignedPrograms: ["prog_taheel"],
-      assignedGroups: ["grp_th_001"],
-      isRestricted: false,
-    },
-    {
-      id: "supervisor_3",
-      name: "أ. سعد الغامدي",
-      role: "supervisor",
-      phone: "0557778899",
-      password: "1234",
-      email: "saad@alelm.edu.sa",
-      avatar: "سع",
-      color: "#8AA838",
-      assignedPrograms: ["prog_taseel"],
-      assignedGroups: ["grp_ts_102"],
-      isRestricted: false,
-    },
-    {
-      id: "student_1",
-      name: "عبد الله العتيبي",
-      role: "student",
-      studentNumber: "STU-2026-001",
-      phone: "0550011223",
-      fatherPhone: "0500011223",
-      password: "1234",
-      email: "abdullah@gmail.com",
-      avatar: "عب",
-      currentProgramId: "prog_taseel",
-      currentLevelId: "lvl_ts_1",
-      groupId: "grp_ts_101",
-      supervisorId: "supervisor_1",
-      progress: 78,
-      isRestricted: false,
-    },
-    {
-      id: "student_2",
-      name: "محمد الشهري",
-      role: "student",
-      studentNumber: "STU-2026-002",
-      phone: "0553344556",
-      fatherPhone: "0503344556",
-      password: "1234",
-      email: "m.shehri@gmail.com",
-      avatar: "مح",
-      currentProgramId: "prog_taseel",
-      currentLevelId: "lvl_ts_1",
-      groupId: "grp_ts_101",
-      supervisorId: "supervisor_1",
-      progress: 45,
-      isRestricted: false,
-    },
-    {
-      id: "student_3",
-      name: "خالد الغامدي",
-      role: "student",
-      studentNumber: "STU-2026-003",
-      phone: "0556677889",
-      fatherPhone: "0506677889",
-      password: "1234",
-      email: "khaled@gmail.com",
-      avatar: "خا",
-      currentProgramId: "prog_rasookh",
-      currentLevelId: "lvl_rs_1",
-      groupId: "grp_rs_201",
-      supervisorId: "supervisor_1",
-      progress: 92,
-      isRestricted: false,
-    },
   ],
 
-  // 6. طلبات التسجيل الجديدة[cite: 18]
-  registrationRequests: [
-    {
-      id: "req_101",
-      name: "ياسر القحطاني",
-      phone: "0558899001",
-      fatherPhone: "0508899001",
-      programId: "prog_taseel",
-      requestDate: "2026-08-28",
-      status: "قيد المراجعة",
-    },
-    {
-      id: "req_102",
-      name: "بدر عسيري",
-      phone: "0552233445",
-      fatherPhone: "0502233445",
-      programId: "prog_taheel",
-      requestDate: "2026-08-29",
-      status: "قيد المراجعة",
-    },
-  ],
+  // 6. طلبات التسجيل الجديدة
+  registrationRequests: [],
 
-  // 7. طلبات تعديل البيانات المقدمة للاعتماد[cite: 18]
-  pendingProfileEdits: [
-    {
-      id: "edit_101",
-      studentId: "student_1",
-      studentName: "عبد الله العتيبي",
-      newPhone: "0550099887",
-      newFatherPhone: "0500099887",
-      newEmail: "abdullah.new@gmail.com",
-      requestDate: "2026-08-29",
-      status: "بانتظار الاعتماد",
-    },
-  ],
+  // 7. طلبات تعديل البيانات وكلمات المرور المقدمة للاعتماد
+  pendingProfileEdits: [],
 
-  // 8. سجل مشاركات الطلاب في البرامج[cite: 18]
-  studentPrograms: [
-    {
-      id: "sp_1",
-      studentId: "student_1",
-      programId: "prog_taseel",
-      status: "مستمر",
-      startDate: "2026-01-15",
-      endDate: null,
-    },
-    {
-      id: "sp_2_old",
-      studentId: "student_2",
-      programId: "prog_taheel",
-      status: "مكتمل",
-      startDate: "2025-09-01",
-      endDate: "2026-01-10",
-    },
-    {
-      id: "sp_2_curr",
-      studentId: "student_2",
-      programId: "prog_taseel",
-      status: "مستمر",
-      startDate: "2026-01-15",
-      endDate: null,
-    },
-    {
-      id: "sp_3",
-      studentId: "student_3",
-      programId: "prog_rasookh",
-      status: "مستمر",
-      startDate: "2026-02-01",
-      endDate: null,
-    },
-  ],
+  // 8. سجل مشاركات الطلاب في البرامج
+  studentPrograms: [],
 
-  // 9. مسار التاريخ التعليمي للطالب[cite: 18]
-  studentPaths: [
-    {
-      studentId: "student_1",
-      history: [
-        {
-          programName: "تأصيل",
-          status: "مستمر",
-          period: "2026 - الحالي",
-          isCurrent: true,
-        },
-      ],
-    },
-    {
-      studentId: "student_2",
-      history: [
-        {
-          programName: "تأهيل",
-          status: "مكتمل",
-          period: "2025 - 2026",
-          isCurrent: false,
-        },
-        {
-          programName: "تأصيل",
-          status: "مستمر",
-          period: "2026 - الحالي",
-          isCurrent: true,
-        },
-      ],
-    },
-    {
-      studentId: "student_3",
-      history: [
-        {
-          programName: "رسوخ",
-          status: "مستمر",
-          period: "2026 - الحالي",
-          isCurrent: true,
-        },
-      ],
-    },
-  ],
+  // 9. مسار التاريخ التعليمي للطالب
+  studentPaths: [],
 
-  // 10. عناصر الجدول الأسبوعي[cite: 18]
+  // 10. عناصر الجدول الأسبوعي (نماذج لبرنامج تأهيل فقط)
   schedules: [
-    {
-      id: "sch_ts_1",
-      programId: "prog_taseel",
-      groupId: "grp_ts_101",
-      dayOfWeek: 0,
-      time: "05:00 م",
-      title: "درس أصول الفقه - الوحدة الأولى",
-      type: "lesson",
-      typeLabel: "درس",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "قراءة الباب الأول وتحضير أسئلة المناقشة.",
-    },
-    {
-      id: "sch_ts_2",
-      programId: "prog_taseel",
-      groupId: "grp_ts_101",
-      dayOfWeek: 2,
-      time: "06:30 م",
-      title: "لقاء المدارسة التفاعلي",
-      type: "meeting",
-      typeLabel: "لقاء",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "حضور اللقاء التفاعلي مع أ. أحمد الميموني عبر القاعة الرقمية.",
-    },
-    {
-      id: "sch_ts_3",
-      programId: "prog_taseel",
-      groupId: "grp_ts_101",
-      dayOfWeek: 3,
-      time: "07:00 م",
-      title: "اختبار منتصف البرنامج",
-      type: "exam",
-      typeLabel: "اختبار",
-      status: "قادم",
-      requiresAttendance: false,
-      details: "اختبار تحصيلي إلكتروني يحتوي 20 سؤال اختيار من متعدد.",
-    },
     {
       id: "sch_th_1",
       programId: "prog_taheel",
@@ -441,204 +199,20 @@ window.db = {
       requiresAttendance: true,
       details: "تطبيق أحكام التجويد ومخارج الحروف.",
     },
-    {
-      id: "sch_rs_1",
-      programId: "prog_rasookh",
-      groupId: "grp_rs_201",
-      dayOfWeek: 0,
-      time: "07:30 م",
-      title: "حلقة التحليل والتمكين المتقدم",
-      type: "meeting",
-      typeLabel: "لقاء",
-      status: "قادم",
-      requiresAttendance: true,
-      details: "مناقشة أبحاث التخرج وقضايا الخلاف العالي.",
-    },
-    {
-      id: "sch_rs_2",
-      programId: "prog_rasookh",
-      groupId: "grp_rs_201",
-      dayOfWeek: 6,
-      time: "06:00 م",
-      title: "التقييم الأسبوعي ومقياس الرسوخ",
-      type: "assessment",
-      typeLabel: "تقييم",
-      status: "قادم",
-      requiresAttendance: false,
-      details: "مراجعة المؤشرات المهارية والبحثية.",
-    },
   ],
 
-  // 11. سجلات الحضور والتحضير[cite: 18]
-  attendanceRecords: [
-    {
-      id: "att_1",
-      scheduleId: "sch_ts_1",
-      studentId: "student_1",
-      status: "حاضر",
-      updatedAt: "2026-08-23 05:10 م",
-      recordedBy: "supervisor_1",
-    },
-  ],
+  // 11. سجلات الحضور والتحضير
+  attendanceRecords: [],
 
-  // 12. سجل المهام والتكليفات[cite: 18]
-  tasks: [
-    {
-      id: "tsk_201",
-      title: "أن يقوم مسؤول شؤون الطلاب بنفسه بالتحضير الأسبوعي",
-      programId: "prog_taseel",
-      dayOfWeek: 0,
-      date: "2026-08-30",
-      startTime: "04:30 م",
-      endTime: "06:00 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_1",
-      status: "قيد التنفيذ",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: true,
-      recurringDays: [0],
-      stopDate: "2026-11-30",
-      requiresAttendance: true,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "التحضير المسبق وتدوين مداخلات الطلاب ومتابعة نسبة الفهم.",
-    },
-    {
-      id: "tsk_202",
-      title:
-        "أن تعد إدارة البرنامج السؤال الأسبوعي ويكون متعلق بما تم شرحه في هذا الأسبوع",
-      programId: "prog_taseel",
-      dayOfWeek: 0,
-      date: "2026-08-30",
-      startTime: "07:00 م",
-      endTime: "08:30 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_3",
-      status: "مكتملة",
-      completedAt: "2026-08-29 08:15 م",
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: false,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "إعداد السؤال الأسبوعي واعتماد نموذج الإجابة الصحيحة.",
-    },
-    {
-      id: "tsk_203",
-      title: "أن تتواصل إدارة البرنامج مع الطلاب المتغيبين بدون عذر",
-      programId: "prog_taseel",
-      dayOfWeek: 2,
-      date: "2026-09-01",
-      startTime: "06:00 م",
-      endTime: "07:00 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_1",
-      status: "معفى بعذر",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: false,
-      isExempt: true,
-      exemptionReason: "عذر رسمي لانتداب خارجي معتمد من الإدارة.",
-      createdBy: "admin",
-      description: "التواصل الهاتفي المباشر مع أولياء أمور الطلاب المتغيبين.",
-    },
-    {
-      id: "tsk_204",
-      title:
-        "أن يسلم للطلاب جدول قراءة الشرح قبل 5 أيام من بداية الدرس الأسبوعي",
-      programId: "prog_taheel",
-      dayOfWeek: 1,
-      date: "2026-08-31",
-      startTime: "05:00 م",
-      endTime: "06:30 م",
-      assigneeRole: "supervisor",
-      assignedTo: "supervisor_2",
-      status: "لم تبدأ",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: true,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "إرسال الجداول بصيغة PDF للطلاب في المجموعة المعتمدة.",
-    },
-    {
-      id: "tsk_101",
-      title:
-        "أن يذكر الطلاب بقراءة المقدار الأسبوعي للمتن في المجموعة الطلابية قبل الدرس",
-      programId: "prog_taseel",
-      dayOfWeek: 1,
-      date: "2026-08-31",
-      startTime: "08:00 ص",
-      endTime: "11:59 م",
-      assigneeRole: "student",
-      assignedTo: "student_1",
-      status: "قيد التنفيذ",
-      completedAt: null,
-      delegatedFrom: null,
-      isRecurring: false,
-      requiresAttendance: false,
-      isExempt: false,
-      exemptionReason: null,
-      createdBy: "admin",
-      description: "التأكد من قراءة المقرر المحدد قبل الحضور.",
-    },
-  ],
+  // 12. سجل المهام والتكليفات
+  tasks: [],
 
-  // 13. لوحة الإعلانات العامة[cite: 18]
-  announcements: [
-    {
-      id: "anc_1",
-      title: "بدء فتح رصد تحضير الجلسات وحلقات المدارسة",
-      content:
-        "نحيط جميع المشرفين الكرام بأنه تم تفعيل خانات التحضير للمهام والجلسات المحددة في الجدول الأسبوعي. يرجى المبادرة برصد حضور الطلاب في وقت الجلسة.",
-      publisher: "إدارة المنصة المركزية",
-      targetGroup: "supervisors",
-      mediaType: "image",
-      mediaUrl: "logo16.png",
-      date: "2026-08-28",
-      expiresAt: "2026-09-15",
-      priority: "عاجل",
-    },
-    {
-      id: "anc_2",
-      title: "مواعيد اختبارات منتصف برنامج التأصيل",
-      content:
-        "تقرر عقد الاختبار النصفي لطلاب برنامج التأصيل يوم الأربعاء القادم في تمام الساعة 07:00 مساءً إلكترونياً عبر بوابة الاختبارات.",
-      publisher: "أ. أحمد الميموني (مشرف التأصيل)",
-      targetGroup: "prog_taseel",
-      mediaType: "none",
-      mediaUrl: "",
-      date: "2026-08-27",
-      expiresAt: "2026-09-05",
-      priority: "عادي",
-    },
-  ],
+  // 13. لوحة الإعلانات العامة
+  announcements: [],
 
-  // 14. التنبيهات والإشعارات[cite: 18]
-  notifications: [
-    {
-      id: "notif_101",
-      userId: "admin",
-      category: "إشعار إداري",
-      title: "طلب تسجيل جديد",
-      message: "قام الطالب بدر عسيري بتقديم طلب التحاق ببرنامج التأهيل.",
-      date: "قبل 15 دقيقة",
-      isRead: false,
-    },
-    {
-      id: "notif_102",
-      userId: "supervisor_1",
-      category: "تذكير بمهمة",
-      title: "تذكير بمهمة قادمة",
-      message: "لديك مهمة معيارية مجدولة ليوم الأحد القادم.",
-      date: "قبل ساعة",
-      isRead: false,
-    },
-  ],
+  // 14. التنبيهات والإشعارات
+  notifications: [],
 };
+
+// نسخة من البذور الافتراضية للرجوع إليها عند الحاجة (لا تُعدّل)
+window.__DB_SEED__ = JSON.parse(JSON.stringify(window.db));

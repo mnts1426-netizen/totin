@@ -47,13 +47,19 @@ window.views = {
           id: "supervisors",
           icon: "fa-user-tie",
           color: "#E59824",
-          label: "إدارة المشرفين",
+          label: "المشرفون والإداريون",
         },
         {
           id: "attendance",
           icon: "fa-clipboard-user",
           color: "#9E1B48",
           label: "سجلات التحضير",
+        },
+        {
+          id: "day-review",
+          icon: "fa-calendar-day",
+          color: "#0B2533",
+          label: "مراجعة يوم محدد",
         },
         {
           id: "announcements",
@@ -180,28 +186,55 @@ window.views = {
 
   // 2. شاشة بوابة اختيار البرامج
   renderPortalView() {
+    // في رابط الطلاب الخاص ببرنامج محدد لا يُعرض إلا ذلك البرنامج، وفي غيره تُعرض كل البرامج
+    const visiblePrograms =
+      state.portalMode === "student" && state.lockedProgramId
+        ? db.programs.filter((p) => p.id === state.lockedProgramId)
+        : db.programs;
+
+    const modeNote =
+      state.portalMode === "staff"
+        ? "بوابة المشرفين والإدارة — اختر البرنامج الذي تريد الدخول إليه"
+        : state.portalMode === "student"
+          ? "بوابة الطلاب — الدخول إلى برنامجك"
+          : "اختر البرنامج للمتابعة";
+
     return `
             <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-8 max-w-4xl mx-auto my-4 sm:my-8 border-t-4 border-t-[#D4A359]">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    ${db.programs
-                      .map(
-                        (prog) => `
-                        <div class="rounded-3xl border-2 border-slate-200 hover:border-[#D4A359] p-6 sm:p-8 flex flex-col justify-between space-y-6 bg-white hover:shadow-md transition-all text-center relative overflow-hidden group">
-                            <div class="absolute top-0 left-0 right-0 h-1 bg-[#D4A359]/40 group-hover:bg-[#D4A359] transition-all"></div>
+                <div class="text-center mb-5 sm:mb-7">
+                    <p class="text-xs sm:text-sm font-bold text-slate-500">${modeNote}</p>
+                </div>
+                <div class="grid grid-cols-1 ${visiblePrograms.length === 1 ? "max-w-sm mx-auto" : "md:grid-cols-3"} gap-5">
+                    ${visiblePrograms
+                      .map((prog) => {
+                        const closed = !!prog.isClosed;
+                        return `
+                        <div class="rounded-3xl border-2 ${closed ? "border-slate-200 bg-slate-50/60" : "border-slate-200 hover:border-[#D4A359] bg-white hover:shadow-md"} p-6 sm:p-8 flex flex-col justify-between space-y-6 transition-all text-center relative overflow-hidden group">
+                            <div class="absolute top-0 left-0 right-0 h-1 ${closed ? "bg-slate-300" : "bg-[#D4A359]/40 group-hover:bg-[#D4A359]"} transition-all"></div>
                             <div class="py-4">
-                                <h3 class="text-2xl sm:text-3xl font-black text-[#0B2533] mb-2">${prog.name}</h3>
-                                <div class="w-10 h-1 bg-[#D4A359] rounded-full mx-auto"></div>
+                                <h3 class="text-2xl sm:text-3xl font-black ${closed ? "text-slate-400" : "text-[#0B2533]"} mb-2">${prog.name}</h3>
+                                <div class="w-10 h-1 ${closed ? "bg-slate-300" : "bg-[#D4A359]"} rounded-full mx-auto"></div>
+                                ${
+                                  closed
+                                    ? `<div class="mt-3 inline-flex items-center gap-1.5 bg-slate-200 text-slate-600 text-[11px] font-black px-3 py-1 rounded-full">
+                                        <i class="fa-solid fa-lock text-[10px]"></i> البرنامج مغلق حالياً
+                                       </div>`
+                                    : ""
+                                }
                             </div>
 
                             <div>
-                                <button onclick="selectProgramPath('${prog.id}')" class="w-full py-3 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-black rounded-2xl text-xs sm:text-sm transition shadow-sm flex items-center justify-center">
-                                    <span>دخول برنامج ${prog.name}</span>
-                                    <i class="fa-solid fa-arrow-left mr-2 text-xs"></i>
+                                <button ${closed ? "disabled" : `onclick="selectProgramPath('${prog.id}')"`} class="w-full py-3 font-black rounded-2xl text-xs sm:text-sm transition shadow-sm flex items-center justify-center ${closed ? "bg-slate-200 text-slate-400 cursor-not-allowed" : "bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white"}">
+                                    ${
+                                      closed
+                                        ? `<i class="fa-solid fa-lock ml-2 text-xs"></i><span>الدخول مغلق</span>`
+                                        : `<span>دخول برنامج ${prog.name}</span><i class="fa-solid fa-arrow-left mr-2 text-xs"></i>`
+                                    }
                                 </button>
                             </div>
                         </div>
-                    `,
-                      )
+                    `;
+                      })
                       .join("")}
                 </div>
             </div>
@@ -210,7 +243,10 @@ window.views = {
 
   // 3. نافذة تسجيل الدخول للبرنامج المحدد
   openLoginModal(programId) {
-    const prog = db.programs.find((p) => p.id === programId) || db.programs[1];
+    const prog =
+      db.programs.find((p) => p.id === programId) ||
+      getActivePrograms()[0] ||
+      db.programs[0];
 
     const modalHtml = `
             <div id="login-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
@@ -230,27 +266,30 @@ window.views = {
                             <label class="block font-bold text-slate-700 mb-1">اختر الحساب للدخول المباشر:</label>
                             <select id="login-user-select" onchange="views.fillLoginCredentials(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                                 <option value="">-- اختر الحساب المطلوب --</option>
-                                <optgroup label="الإدارة">
-                                    <option value="admin">مدير النظام (إدارة كاملة)</option>
-                                </optgroup>
-                                <optgroup label="المشرفون">
-                                    ${db.users
-                                      .filter((u) => u.role === "supervisor")
-                                      .map(
-                                        (s) =>
-                                          `<option value="${s.id}">${s.name}</option>`,
-                                      )
-                                      .join("")}
-                                </optgroup>
-                                <optgroup label="الطلاب">
-                                    ${db.users
-                                      .filter((u) => u.role === "student")
-                                      .map(
-                                        (st) =>
-                                          `<option value="${st.id}">طالب: ${st.name}</option>`,
-                                      )
-                                      .join("")}
-                                </optgroup>
+                                ${(() => {
+                                  const admins = db.users.filter((u) => u.role === "admin");
+                                  const sups = db.users.filter((u) => u.role === "supervisor");
+                                  const studs = db.users.filter(
+                                    (u) =>
+                                      u.role === "student" &&
+                                      (!state.lockedProgramId ||
+                                        u.currentProgramId === state.lockedProgramId),
+                                  );
+                                  const staffGroups = `
+                                    <optgroup label="الإدارة">
+                                        ${admins.map((a) => `<option value="${a.id}">${a.name}</option>`).join("")}
+                                    </optgroup>
+                                    <optgroup label="المشرفون">
+                                        ${sups.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")}
+                                    </optgroup>`;
+                                  const studentGroup = `
+                                    <optgroup label="الطلاب">
+                                        ${studs.map((st) => `<option value="${st.id}">طالب: ${st.name}</option>`).join("")}
+                                    </optgroup>`;
+                                  if (state.portalMode === "student") return studentGroup;
+                                  if (state.portalMode === "staff") return staffGroups;
+                                  return staffGroups + studentGroup;
+                                })()}
                             </select>
                         </div>
 
@@ -302,11 +341,8 @@ window.views = {
                     </div>
                 </div>
                 <div class="flex items-center space-x-2 space-x-reverse shrink-0">
-                    <button onclick="views.triggerAppInstall()" class="px-3.5 py-1.5 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-xl text-xs transition shadow-xs flex items-center">
-                        <i class="fa-solid fa-download ml-1.5 text-xs"></i> تثبيت التطبيق
-                    </button>
-                    <button onclick="views.requestPushNotification()" class="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs transition border border-white/20 flex items-center">
-                        <i class="fa-solid fa-bell ml-1 text-xs text-[#D4A359]"></i> تفعيل الإشعارات
+                    <button onclick="views.installAppAndNotify()" class="js-install-notify-btn px-3.5 py-1.5 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-xl text-xs transition shadow-xs flex items-center">
+                        <i class="fa-solid fa-cloud-arrow-down ml-1.5 text-xs"></i> تثبيت التطبيق وتفعيل الإشعارات
                     </button>
                     <button onclick="document.getElementById('pwa-install-banner').remove()" class="p-1.5 text-slate-400 hover:text-white rounded-lg transition" title="إغلاق">
                         <i class="fa-solid fa-xmark text-sm"></i>
@@ -322,7 +358,9 @@ window.views = {
 
     // واجهة الطالب
     const currentProg =
-      db.programs.find((p) => p.id === user.currentProgramId) || db.programs[1];
+      db.programs.find((p) => p.id === user.currentProgramId) ||
+      getActivePrograms()[0] ||
+      db.programs[0];
     const studentTasks = db.tasks.filter((t) => t.assignedTo === user.id);
     const pendingTasks = studentTasks.filter(
       (t) => t.status !== "مكتملة" && t.status !== "معفى بعذر",
@@ -377,41 +415,22 @@ window.views = {
         `;
   },
 
-  // دوال مساعدة لشريط التثبيت والتنبيهات
-  triggerAppInstall() {
-    if (window.deferredPrompt) {
-      window.deferredPrompt.prompt();
-      window.deferredPrompt.userChoice.then((choiceResult) => {
-        if (choiceResult.outcome === "accepted") {
-          alert("تم بدء تثبيت المنصة كتطبيق على جهازك بنجاح.");
-        }
-        window.deferredPrompt = null;
-      });
+  // دالة موحّدة: تثبيت التطبيق + تفعيل الإشعارات بضغطة واحدة (بدون أي خدمة خارجية)
+  installAppAndNotify() {
+    if (typeof window.installAppAndEnableNotifications === "function") {
+      window.installAppAndEnableNotifications();
     } else {
-      alert(
-        'لتثبيت التطبيق على جهازك:\n- على جوال آيفون: اضغط زر المشاركة (Share) ثم اختر "إضافة إلى الصفحة الرئيسية (Add to Home Screen)".\n- على أندرويد والكمبيوتر: اضغط على زر خيارات المتصفح (⋮) واختر "تثبيت التطبيق (Install App)".',
-      );
+      alert("تعذر تحميل وحدة التثبيت. يرجى تحديث الصفحة والمحاولة مجدداً.");
     }
   },
 
+  // إبقاء الأسماء القديمة للتوافق
+  triggerAppInstall() {
+    this.installAppAndNotify();
+  },
+
   requestPushNotification() {
-    if (!("Notification" in window)) {
-      alert("متصفحك لا يدعم الإشعارات الفورية.");
-      return;
-    }
-    Notification.requestPermission().then((permission) => {
-      if (permission === "granted") {
-        alert(
-          "تم تفعيل الإشعارات الفورية بنجاح! ستصلك التنبيهات حتى عند إغلاق التطبيق.",
-        );
-        new Notification("المنصة الالكترونية", {
-          body: "تم تفعيل نظام الإشعارات الفورية لحسابك بنجاح.",
-          icon: "logo15.png",
-        });
-      } else {
-        alert("تم رفض إذن الإشعارات، يمكنك إعادة تفعيلها من إعدادات المتصفح.");
-      }
-    });
+    this.installAppAndNotify();
   },
 
   // 5. لوحة الإدارة العامة
@@ -466,7 +485,7 @@ window.views = {
                         <span class="kpi-tag">KPI</span>
                         <div class="text-[11px] text-slate-600 font-bold mb-1">البرامج المفعلة</div>
                         <div class="flex items-center justify-between mt-1">
-                            <div class="text-lg font-black text-[#0B2533]">${db.programs.length} برامج</div>
+                            <div class="text-lg font-black text-[#0B2533]">${getActivePrograms().length} برامج</div>
                             <div class="w-8 h-8 rounded-xl bg-purple-100 text-[#2B1736] flex items-center justify-center text-sm">
                                 <i class="fa-solid fa-layer-group"></i>
                             </div>
@@ -474,7 +493,7 @@ window.views = {
                     </div>
                 </div>
 
-                ${this.renderScheduleWidget("prog_taseel", 0, state.scheduleViewMode)}
+                ${this.renderScheduleWidget(firstActiveProgramId(), 0, state.scheduleViewMode)}
             </div>
         `;
   },
@@ -496,17 +515,23 @@ window.views = {
     const isSupervisor = state.currentRole === "supervisor";
     const currentDayIndex = new Date().getDay();
 
+    // البرامج المفعّلة فقط (تأصيل ورسوخ مغلقان)
+    const activePrograms = getActivePrograms();
+
     let targetPrograms = [];
     if (isAdmin && viewMode === "stacked") {
-      targetPrograms = db.programs;
+      targetPrograms = activePrograms;
     } else if (isSupervisor) {
       const assigned = state.currentUser.assignedPrograms || [];
-      targetPrograms = db.programs.filter((p) => assigned.includes(p.id));
-      if (targetPrograms.length === 0) targetPrograms = [db.programs[0]];
+      targetPrograms = activePrograms.filter((p) => assigned.includes(p.id));
+      if (targetPrograms.length === 0 && activePrograms.length)
+        targetPrograms = [activePrograms[0]];
     } else {
-      targetPrograms = [
-        db.programs.find((p) => p.id === programId) || db.programs[1],
-      ];
+      const one =
+        activePrograms.find((p) => p.id === programId) ||
+        activePrograms[0] ||
+        db.programs[0];
+      targetPrograms = one ? [one] : [];
     }
 
     return `
@@ -575,6 +600,11 @@ window.views = {
                                 <div class="flex items-center space-x-2 space-x-reverse">
                                     <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: ${prog.color};"></span>
                                     <h4 class="font-black text-[#0B2533] text-sm sm:text-base">${viewMode === "unified" ? "الجدول الشامل لجميع البرامج" : "برنامج " + prog.name}</h4>
+                                    ${
+                                      viewMode !== "unified" && prog.isClosed
+                                        ? `<span class="inline-flex items-center gap-1 bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full"><i class="fa-solid fa-lock text-[9px]"></i> مغلق</span>`
+                                        : ""
+                                    }
                                 </div>
                             </div>
 
@@ -918,8 +948,10 @@ window.views = {
     const user = state.currentUser;
     const isAdmin = user.role === "admin";
     const availablePrograms = isAdmin
-      ? db.programs
-      : db.programs.filter((p) => (user.assignedPrograms || []).includes(p.id));
+      ? getActivePrograms()
+      : getActivePrograms().filter((p) =>
+          (user.assignedPrograms || []).includes(p.id),
+        );
     const students = db.users.filter(
       (u) => u.role === "student" && !u.isRestricted,
     );
@@ -1141,8 +1173,10 @@ window.views = {
     const user = state.currentUser;
     const isSupervisor = user.role === "supervisor";
     const availablePrograms = isSupervisor
-      ? db.programs.filter((p) => (user.assignedPrograms || []).includes(p.id))
-      : db.programs;
+      ? getActivePrograms().filter((p) =>
+          (user.assignedPrograms || []).includes(p.id),
+        )
+      : getActivePrograms();
 
     const currentProgId =
       state.currentProgramId &&
@@ -1150,7 +1184,7 @@ window.views = {
         ? state.currentProgramId
         : availablePrograms[0]
           ? availablePrograms[0].id
-          : "prog_taseel";
+          : firstActiveProgramId();
 
     const activeSchedule =
       db.schedules.find(
@@ -1419,24 +1453,31 @@ window.views = {
                     ? `
                     <div class="bg-purple-50/70 border border-purple-200 rounded-2xl p-3.5 space-y-2.5">
                         <h3 class="text-xs font-black text-[#2B1736] flex items-center">
-                            <i class="fa-solid fa-user-pen ml-1.5 text-[#D4A359]"></i> طلبات تعديل بيانات مقدمة من الطلاب (${pendingEdits.length})
+                            <i class="fa-solid fa-user-pen ml-1.5 text-[#D4A359]"></i> طلبات تحتاج اعتماد المدير (${pendingEdits.length})
                         </h3>
                         <div class="space-y-1.5">
                             ${pendingEdits
-                              .map(
-                                (edit) => `
-                                <div class="bg-white p-2.5 rounded-xl border border-purple-200 flex justify-between items-center text-xs">
+                              .map((edit) => {
+                                const changes = [];
+                                if (edit.newName) changes.push(`الاسم: ${edit.newName}`);
+                                if (edit.newPhone) changes.push(`جوال: ${edit.newPhone}`);
+                                if (edit.newNationalId) changes.push(`هوية: ${edit.newNationalId}`);
+                                if (edit.newEmail) changes.push(`إيميل: ${edit.newEmail}`);
+                                if (edit.newPassword) changes.push(`كلمة مرور جديدة`);
+                                return `
+                                <div class="bg-white p-2.5 rounded-xl border border-purple-200 flex justify-between items-center text-xs gap-2">
                                     <div>
-                                        <span class="font-bold text-slate-800">${edit.studentName}</span>
-                                        <span class="text-slate-500 mr-2">جوال جديد: ${edit.newPhone}</span>
+                                        <span class="font-bold text-slate-800">${edit.studentName || edit.userName || "مستخدم"}</span>
+                                        <span class="badge badge-pending text-[9px] mr-1">${edit.userRole === "supervisor" ? "مشرف" : "طالب"}</span>
+                                        <div class="text-slate-500 mt-0.5">${changes.join(" — ") || "طلب تعديل"}</div>
                                     </div>
-                                    <div class="flex items-center space-x-1.5 space-x-reverse">
+                                    <div class="flex items-center space-x-1.5 space-x-reverse shrink-0">
                                         <button onclick="approveProfileEdit('${edit.id}')" class="px-2.5 py-1 bg-emerald-600 text-white font-bold rounded-lg">اعتماد</button>
                                         <button onclick="rejectProfileEdit('${edit.id}')" class="px-2.5 py-1 bg-rose-100 text-rose-700 font-bold rounded-lg">رفض</button>
                                     </div>
                                 </div>
-                            `,
-                              )
+                            `;
+                              })
                               .join("")}
                         </div>
                     </div>
@@ -1482,6 +1523,11 @@ window.views = {
                                 <button onclick="toggleUserRestriction('${st.id}')" class="px-2 py-1 ${st.isRestricted ? "bg-emerald-100 text-emerald-800" : "bg-rose-50 text-rose-700"} rounded-xl text-[10px] font-bold transition">
                                     ${st.isRestricted ? "فك" : "تقييد"}
                                 </button>
+                                ${
+                                  state.currentRole === "admin"
+                                    ? `<button onclick="deleteStudent('${st.id}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-xl transition" title="حذف الطالب نهائياً"><i class="fa-solid fa-trash-can"></i></button>`
+                                    : ""
+                                }
                             </div>
                         </div>
                     `,
@@ -1719,22 +1765,27 @@ window.views = {
                                 <input id="edit-stu-phone" value="${student.phone || ""}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
                             </div>
                             <div>
-                                <label class="block font-bold text-slate-700 mb-1">جوال ولي الأمر:</label>
-                                <input id="edit-stu-father-phone" value="${student.fatherPhone || ""}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
+                                <label class="block font-bold text-slate-700 mb-1">رقم الهوية:</label>
+                                <input id="edit-stu-nid" value="${student.nationalId || ""}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
                             </div>
                         </div>
 
                         <div class="grid grid-cols-2 gap-2.5">
                             <div>
-                                <label class="block font-bold text-slate-700 mb-1">البرنامج:</label>
-                                <select id="edit-stu-prog" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700 focus:outline-none focus:border-[#D4A359]">
-                                    ${db.programs.map((p) => `<option value="${p.id}" ${p.id === student.currentProgramId ? "selected" : ""}>${p.name}</option>`).join("")}
-                                </select>
+                                <label class="block font-bold text-slate-700 mb-1">جوال ولي الأمر:</label>
+                                <input id="edit-stu-father-phone" value="${student.fatherPhone || ""}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
                             </div>
                             <div>
-                                <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
-                                <input id="edit-stu-pass" value="${student.password || "1234"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                                <label class="block font-bold text-slate-700 mb-1">البرنامج:</label>
+                                <select id="edit-stu-prog" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700 focus:outline-none focus:border-[#D4A359]">
+                                    ${getActivePrograms().map((p) => `<option value="${p.id}" ${p.id === student.currentProgramId ? "selected" : ""}>${p.name}</option>`).join("")}
+                                </select>
                             </div>
+                        </div>
+
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
+                            <input id="edit-stu-pass" value="${student.password || "1234"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                         </div>
 
                         <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
@@ -1752,6 +1803,7 @@ window.views = {
   handleEditStudentSubmit(studentId) {
     const name = document.getElementById("edit-stu-name").value;
     const phone = document.getElementById("edit-stu-phone").value;
+    const nationalId = document.getElementById("edit-stu-nid").value;
     const fatherPhone = document.getElementById("edit-stu-father-phone").value;
     const currentProgramId = document.getElementById("edit-stu-prog").value;
     const password = document.getElementById("edit-stu-pass").value;
@@ -1759,6 +1811,7 @@ window.views = {
     updateStudentData(studentId, {
       name,
       phone,
+      nationalId,
       fatherPhone,
       currentProgramId,
       password,
@@ -1789,17 +1842,27 @@ window.views = {
                                 <input id="new-stu-phone" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]" placeholder="05xxxxxxxx">
                             </div>
                             <div>
-                                <label class="block font-bold text-slate-700 mb-1">جوال ولي الأمر:</label>
-                                <input id="new-stu-father-phone" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]" placeholder="05xxxxxxxx">
+                                <label class="block font-bold text-slate-700 mb-1">رقم الهوية:</label>
+                                <input id="new-stu-nid" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]" placeholder="10xxxxxxxx">
                             </div>
                         </div>
 
-                        <div>
-                            <label class="block font-bold text-slate-700 mb-1">البرنامج:</label>
-                            <select id="new-stu-prog" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700 focus:outline-none focus:border-[#D4A359]">
-                                ${db.programs.map((p) => `<option value="${p.id}">${p.name}</option>`).join("")}
-                            </select>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">جوال ولي الأمر:</label>
+                                <input id="new-stu-father-phone" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]" placeholder="05xxxxxxxx">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">البرنامج:</label>
+                                <select id="new-stu-prog" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700 focus:outline-none focus:border-[#D4A359]">
+                                    ${getActivePrograms().map((p) => `<option value="${p.id}">${p.name}</option>`).join("")}
+                                </select>
+                            </div>
                         </div>
+
+                        <p class="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2 border border-slate-200">
+                            كلمة المرور الافتراضية <b>1234</b>، ويغيّرها الطالب لاحقاً باعتماد الإدارة. لا يُسمح بتكرار رقم الجوال أو رقم الهوية.
+                        </p>
 
                         <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
                             <button type="button" onclick="closeModal('add-student-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
@@ -1816,33 +1879,78 @@ window.views = {
   handleStudentSubmit() {
     const name = document.getElementById("new-stu-name").value;
     const phone = document.getElementById("new-stu-phone").value;
+    const nationalId = document.getElementById("new-stu-nid").value;
     const fatherPhone = document.getElementById("new-stu-father-phone").value;
     const currentProgramId = document.getElementById("new-stu-prog").value;
 
-    addNewStudent({ name, phone, fatherPhone, currentProgramId });
+    addNewStudent({ name, phone, nationalId, fatherPhone, currentProgramId });
   },
 
-  // 16. إدارة المشرفين
+  // 16. إدارة المشرفين والإداريين (المدير فقط يضيف إداريين)
   renderAdminSupervisorsView() {
+    const isAdmin = state.currentRole === "admin";
     const supervisors = db.users.filter((u) => u.role === "supervisor");
+    const admins = db.users.filter((u) => u.role === "admin");
+
+    const userRow = (u, kind) => `
+        <div class="p-3 sm:p-4 rounded-2xl border ${u.isRestricted ? "border-rose-300 bg-rose-50/20" : "border-slate-200 bg-white"} flex flex-col md:flex-row justify-between md:items-center gap-3 hover:border-[#D4A359] transition">
+            <div class="flex items-center space-x-3 space-x-reverse">
+                <div class="w-9 h-9 rounded-2xl font-bold text-white flex items-center justify-center shadow-xs" style="background-color: ${u.color || "#0B2533"};">
+                    ${u.avatar || (kind === "admin" ? "مد" : "مش")}
+                </div>
+                <div>
+                    <div class="flex items-center space-x-1.5 space-x-reverse">
+                        <h4 class="font-bold text-slate-800 text-xs sm:text-sm">${u.name}</h4>
+                        <span class="badge ${kind === "admin" ? "badge-exempt" : "badge-active"} text-[9px]">${kind === "admin" ? "إداري" : "مشرف"}</span>
+                        ${u.isRestricted ? '<span class="badge badge-restricted text-[9px]">مقيد</span>' : ""}
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-0.5">
+                        <span>جوال: ${u.phone || "غير مسجل"}</span>
+                        ${u.nationalId ? ` | <span>هوية: ${u.nationalId}</span>` : ""}
+                        ${kind === "supervisor" ? ` | <span>البرامج: ${(u.assignedPrograms || []).map((p) => getProgramName(p)).join("، ") || "—"}</span>` : ""}
+                    </div>
+                </div>
+            </div>
+            ${
+              isAdmin
+                ? `
+            <div class="flex items-center space-x-1.5 space-x-reverse flex-wrap gap-y-1.5">
+                <button onclick="views.${kind === "admin" ? "openEditAdminModal" : "openEditSupervisorModal"}('${u.id}')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition">
+                    <i class="fa-solid fa-pen-to-square"></i> تعديل
+                </button>
+                ${
+                  kind === "supervisor"
+                    ? `<button onclick="toggleUserRestriction('${u.id}')" class="px-2.5 py-1 ${u.isRestricted ? "bg-emerald-100 text-emerald-800" : "bg-rose-50 text-rose-700"} rounded-xl text-xs font-bold transition">${u.isRestricted ? "فك" : "تقييد"}</button>`
+                    : ""
+                }
+                ${
+                  u.id === "admin"
+                    ? ""
+                    : `<button onclick="${kind === "admin" ? `deleteAdmin('${u.id}')` : `deleteSupervisor('${u.id}')`}" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-xl transition"><i class="fa-solid fa-trash-can"></i></button>`
+                }
+            </div>`
+                : ""
+            }
+        </div>`;
 
     return `
             <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-5 border-t-4 border-t-[#D4A359]">
                 <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3.5">
-                    <div>
-                        <h2 class="text-lg sm:text-xl font-extrabold text-[#0B2533]"><i class="fa-solid fa-user-tie text-[#D4A359] ml-2"></i> إدارة المشرفين</h2>
-                    </div>
+                    <h2 class="text-lg sm:text-xl font-extrabold text-[#0B2533]"><i class="fa-solid fa-user-tie text-[#D4A359] ml-2"></i> المشرفون والإداريون</h2>
 
                     ${
-                      state.currentRole === "admin"
+                      isAdmin
                         ? `
                         <div class="flex items-center space-x-2 space-x-reverse flex-wrap gap-y-2">
                             <label class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center cursor-pointer">
-                                <i class="fa-solid fa-file-excel ml-1"></i> استيراد من Excel / CSV
+                                <i class="fa-solid fa-file-excel ml-1"></i> استيراد مشرفين Excel / CSV
                                 <input type="file" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleSupervisorExcelImport(event)">
                             </label>
                             <button onclick="views.openAddSupervisorModal()" class="px-3 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center">
                                 <i class="fa-solid fa-user-plus ml-1 text-[#D4A359]"></i> إضافة مشرف
+                            </button>
+                            <button onclick="views.openAddAdminModal()" class="px-3 py-1.5 bg-[#9E1B48] hover:bg-[#7d1439] text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center">
+                                <i class="fa-solid fa-user-shield ml-1"></i> إضافة إداري
                             </button>
                         </div>
                     `
@@ -1850,41 +1958,38 @@ window.views = {
                     }
                 </div>
 
-                <div class="space-y-2.5">
-                    ${supervisors
-                      .map(
-                        (sp) => `
-                        <div class="p-3 sm:p-4 rounded-2xl border ${sp.isRestricted ? "border-rose-300 bg-rose-50/20" : "border-slate-200 bg-white"} flex flex-col md:flex-row justify-between md:items-center gap-3 hover:border-[#D4A359] transition">
-                            <div class="flex items-center space-x-3 space-x-reverse">
-                                <div class="w-9 h-9 rounded-2xl font-bold text-white flex items-center justify-center shadow-xs" style="background-color: ${sp.color};">
-                                    ${sp.avatar}
-                                </div>
-                                <div>
-                                    <div class="flex items-center space-x-1.5 space-x-reverse">
-                                        <h4 class="font-bold text-slate-800 text-xs sm:text-sm">${sp.name}</h4>
-                                        ${sp.isRestricted ? '<span class="badge badge-restricted text-[9px]">مقيد</span>' : ""}
-                                    </div>
-                                    <div class="text-[11px] text-slate-500 mt-0.5">
-                                        <span>جوال: ${sp.phone || "غير مسجل"}</span> | 
-                                        <span>البرامج: ${(sp.assignedPrograms || []).map((p) => getProgramName(p)).join("، ")}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="flex items-center space-x-1.5 space-x-reverse">
-                                <button onclick="toggleUserRestriction('${sp.id}')" class="px-2.5 py-1 ${sp.isRestricted ? "bg-emerald-100 text-emerald-800" : "bg-rose-50 text-rose-700"} rounded-xl text-xs font-bold transition">
-                                    ${sp.isRestricted ? "فك" : "تقييد"}
-                                </button>
-                                <button onclick="deleteSupervisor('${sp.id}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-xl transition">
-                                    <i class="fa-solid fa-trash-can"></i>
-                                </button>
-                            </div>
-                        </div>
-                    `,
-                      )
-                      .join("")}
+                <div>
+                    <h3 class="text-xs font-black text-slate-500 mb-2">الحسابات الإدارية (${admins.length})</h3>
+                    <div class="space-y-2.5">
+                        ${admins.map((u) => userRow(u, "admin")).join("")}
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="text-xs font-black text-slate-500 mb-2">المشرفون (${supervisors.length})</h3>
+                    <div class="space-y-2.5">
+                        ${
+                          supervisors.length
+                            ? supervisors.map((u) => userRow(u, "supervisor")).join("")
+                            : '<div class="text-center py-6 text-slate-400 text-xs">لا يوجد مشرفون بعد. أضِف مشرفاً من الأعلى.</div>'
+                        }
+                    </div>
                 </div>
             </div>
         `;
+  },
+
+  _programCheckboxes(selectedIds) {
+    const sel = selectedIds || [];
+    return getActivePrograms()
+      .map(
+        (p) => `
+        <label class="flex items-center space-x-1.5 space-x-reverse text-xs font-bold text-slate-700 cursor-pointer">
+            <input type="checkbox" name="sup-progs" value="${p.id}" class="accent-[#D4A359]" ${sel.includes(p.id) ? "checked" : ""}>
+            <span>${p.name}</span>
+        </label>`,
+      )
+      .join("");
   },
 
   openAddSupervisorModal() {
@@ -1904,26 +2009,27 @@ window.views = {
                             <input id="new-sup-name" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
                         </div>
 
-                        <div>
-                            <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
-                            <input id="new-sup-phone" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]" placeholder="05xxxxxxxx">
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
+                                <input id="new-sup-phone" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]" placeholder="05xxxxxxxx">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الهوية:</label>
+                                <input id="new-sup-nid" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]" placeholder="10xxxxxxxx">
+                            </div>
                         </div>
 
                         <div>
                             <label class="block font-bold text-slate-700 mb-1">البرامج المسندة:</label>
                             <div class="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                                ${db.programs
-                                  .map(
-                                    (p) => `
-                                    <label class="flex items-center space-x-1.5 space-x-reverse text-xs font-bold text-slate-700 cursor-pointer">
-                                        <input type="checkbox" name="sup-progs" value="${p.id}" class="accent-[#D4A359]">
-                                        <span>${p.name}</span>
-                                    </label>
-                                `,
-                                  )
-                                  .join("")}
+                                ${this._programCheckboxes([])}
                             </div>
                         </div>
+
+                        <p class="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2 border border-slate-200">
+                            كلمة المرور الافتراضية <b>1234</b>. لا يُسمح بتكرار رقم الجوال أو رقم الهوية.
+                        </p>
 
                         <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
                             <button type="button" onclick="closeModal('add-supervisor-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
@@ -1940,6 +2046,7 @@ window.views = {
   handleSupervisorSubmit() {
     const name = document.getElementById("new-sup-name").value;
     const phone = document.getElementById("new-sup-phone").value;
+    const nationalId = document.getElementById("new-sup-nid").value;
     const checkedBoxes = document.querySelectorAll(
       'input[name="sup-progs"]:checked',
     );
@@ -1950,7 +2057,173 @@ window.views = {
       return;
     }
 
-    addNewSupervisor({ name, phone, assignedPrograms });
+    addNewSupervisor({ name, phone, nationalId, assignedPrograms });
+  },
+
+  openEditSupervisorModal(supId) {
+    const sup = db.users.find((u) => u.id === supId);
+    if (!sup) return;
+    const modalHtml = `
+            <div id="edit-supervisor-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+                <div class="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full overflow-hidden border-t-4 border-t-[#D4A359]">
+                    <div class="bg-[#0B2533] text-white px-5 py-4 flex justify-between items-center border-b border-[#D4A359]">
+                        <h3 class="font-bold text-sm flex items-center">
+                            <i class="fa-solid fa-user-pen text-[#D4A359] ml-1.5"></i> تعديل بيانات المشرف
+                        </h3>
+                        <button onclick="closeModal('edit-supervisor-modal')" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <form onsubmit="event.preventDefault(); views.handleEditSupervisorSubmit('${sup.id}');" class="p-5 space-y-3 text-xs">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">الاسم:</label>
+                            <input id="edit-sup-name" value="${sup.name}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
+                                <input id="edit-sup-phone" value="${sup.phone || ""}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الهوية:</label>
+                                <input id="edit-sup-nid" value="${sup.nationalId || ""}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">البرامج المسندة:</label>
+                            <div class="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                                ${this._programCheckboxes(sup.assignedPrograms || [])}
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
+                            <input id="edit-sup-pass" value="${sup.password || "1234"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                        </div>
+                        <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
+                            <button type="button" onclick="closeModal('edit-supervisor-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
+                            <button type="submit" class="px-4 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl transition shadow-xs">حفظ</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+    document.body.insertAdjacentHTML("beforeend", modalHtml);
+  },
+
+  handleEditSupervisorSubmit(supId) {
+    const name = document.getElementById("edit-sup-name").value;
+    const phone = document.getElementById("edit-sup-phone").value;
+    const nationalId = document.getElementById("edit-sup-nid").value;
+    const password = document.getElementById("edit-sup-pass").value;
+    const assignedPrograms = Array.from(
+      document.querySelectorAll('input[name="sup-progs"]:checked'),
+    ).map((cb) => cb.value);
+    updateSupervisorData(supId, {
+      name,
+      phone,
+      nationalId,
+      password,
+      assignedPrograms,
+    });
+  },
+
+  openAddAdminModal() {
+    const modalHtml = `
+            <div id="add-admin-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+                <div class="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full overflow-hidden border-t-4 border-t-[#9E1B48]">
+                    <div class="bg-[#9E1B48] text-white px-5 py-4 flex justify-between items-center">
+                        <h3 class="font-bold text-sm flex items-center">
+                            <i class="fa-solid fa-user-shield ml-1.5"></i> إضافة حساب إداري
+                        </h3>
+                        <button onclick="closeModal('add-admin-modal')" class="text-white/80 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <form onsubmit="event.preventDefault(); views.handleAdminSubmit();" class="p-5 space-y-3 text-xs">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">الاسم:</label>
+                            <input id="new-adm-name" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#9E1B48]">
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
+                                <input id="new-adm-phone" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#9E1B48]" placeholder="05xxxxxxxx">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الهوية:</label>
+                                <input id="new-adm-nid" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#9E1B48]" placeholder="10xxxxxxxx">
+                            </div>
+                        </div>
+                        <p class="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2 border border-slate-200">
+                            الحساب الإداري له صلاحية كاملة كالمدير. كلمة المرور الافتراضية <b>1234</b>.
+                        </p>
+                        <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
+                            <button type="button" onclick="closeModal('add-admin-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
+                            <button type="submit" class="px-4 py-1.5 bg-[#9E1B48] hover:bg-[#7d1439] text-white font-bold rounded-xl transition shadow-xs">حفظ</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+    document.body.insertAdjacentHTML("beforeend", modalHtml);
+  },
+
+  handleAdminSubmit() {
+    addNewAdmin({
+      name: document.getElementById("new-adm-name").value,
+      phone: document.getElementById("new-adm-phone").value,
+      nationalId: document.getElementById("new-adm-nid").value,
+    });
+  },
+
+  openEditAdminModal(adminId) {
+    const adm = db.users.find((u) => u.id === adminId);
+    if (!adm) return;
+    const modalHtml = `
+            <div id="edit-admin-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+                <div class="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full overflow-hidden border-t-4 border-t-[#9E1B48]">
+                    <div class="bg-[#9E1B48] text-white px-5 py-4 flex justify-between items-center">
+                        <h3 class="font-bold text-sm flex items-center"><i class="fa-solid fa-user-pen ml-1.5"></i> تعديل حساب إداري</h3>
+                        <button onclick="closeModal('edit-admin-modal')" class="text-white/80 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <form onsubmit="event.preventDefault(); views.handleEditAdminSubmit('${adm.id}');" class="p-5 space-y-3 text-xs">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">الاسم:</label>
+                            <input id="edit-adm-name" value="${adm.name}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#9E1B48]">
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
+                                <input id="edit-adm-phone" value="${adm.phone || ""}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#9E1B48]">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">رقم الهوية:</label>
+                                <input id="edit-adm-nid" value="${adm.nationalId || ""}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#9E1B48]">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
+                            <input id="edit-adm-pass" value="${adm.password || "1234"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#9E1B48]">
+                        </div>
+                        <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
+                            <button type="button" onclick="closeModal('edit-admin-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
+                            <button type="submit" class="px-4 py-1.5 bg-[#9E1B48] hover:bg-[#7d1439] text-white font-bold rounded-xl transition shadow-xs">حفظ</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+    document.body.insertAdjacentHTML("beforeend", modalHtml);
+  },
+
+  handleEditAdminSubmit(adminId) {
+    const adm = db.users.find((u) => u.id === adminId);
+    if (!adm) return;
+    updateSupervisorData(adminId, {
+      name: document.getElementById("edit-adm-name").value,
+      phone: document.getElementById("edit-adm-phone").value,
+      nationalId: document.getElementById("edit-adm-nid").value,
+      password: document.getElementById("edit-adm-pass").value,
+      assignedPrograms: adm.assignedPrograms,
+    });
+    // updateSupervisorData يغلق edit-supervisor-modal؛ نغلق مودال الإداري يدوياً
+    closeModal("edit-admin-modal");
   },
 
   // 17. مودال التحضير بالجداول التقليدي
@@ -2098,7 +2371,8 @@ window.views = {
   // 18. الإعدادات
   renderSettingsView() {
     const user = state.currentUser;
-    const isStudent = user.role === "student";
+    const isAdmin = user.role === "admin";
+    const needsApproval = !isAdmin;
 
     return `
             <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-5 border-t-4 border-t-[#D4A359]">
@@ -2109,12 +2383,18 @@ window.views = {
                 <div class="max-w-xl space-y-3.5 text-xs">
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">الاسم:</label>
-                        <input id="set-user-name" value="${user.name}" ${isStudent ? "disabled" : ""} class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                        <input id="set-user-name" value="${user.name}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                     </div>
 
-                    <div>
-                        <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
-                        <input id="set-user-phone" value="${user.phone || "0500000000"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
+                            <input id="set-user-phone" value="${user.phone || ""}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">رقم الهوية:</label>
+                            <input id="set-user-nid" value="${user.nationalId || ""}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
+                        </div>
                     </div>
 
                     <div>
@@ -2122,13 +2402,150 @@ window.views = {
                         <input id="set-user-email" value="${user.email || ""}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:outline-none focus:border-[#D4A359]">
                     </div>
 
+                    <div class="bg-amber-50/60 border border-amber-200 rounded-xl p-3">
+                        <label class="block font-bold text-[#0B2533] mb-1"><i class="fa-solid fa-key text-[#D4A359] ml-1"></i> تغيير كلمة المرور:</label>
+                        <input id="set-user-pass" type="text" placeholder="اترك الحقل فارغاً لعدم التغيير" class="w-full bg-white border border-amber-300 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                        ${
+                          needsApproval
+                            ? `<p class="text-[10px] text-amber-800 mt-1">تغيير كلمة المرور أو البيانات يحتاج <b>اعتماد المدير</b>.</p>`
+                            : ""
+                        }
+                    </div>
+
                     <div class="pt-2">
                         <button onclick="updateProfile()" class="px-5 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl transition shadow-xs">
-                            ${isStudent ? "إرسال طلب التعديل للاعتماد" : "حفظ التعديلات"}
+                            ${needsApproval ? "إرسال طلب التعديل للاعتماد" : "حفظ التعديلات"}
                         </button>
                     </div>
                 </div>
             </div>
+        `;
+  },
+
+  // شاشة "مراجعة يوم محدد" للمدير: كل ما جرى في يوم معيّن (جدول + مهام + تحضير)
+  renderDayReviewView() {
+    const dateISO = state.reviewDate || todayStr();
+    const d = new Date(dateISO + "T00:00:00");
+    const weekday = d.getDay();
+    const dayNames = [
+      "الأحد",
+      "الاثنين",
+      "الثلاثاء",
+      "الأربعاء",
+      "الخميس",
+      "الجمعة",
+      "السبت",
+    ];
+    let hijri = "";
+    try {
+      hijri = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-umalqura", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }).format(d);
+    } catch (e) {
+      hijri = "";
+    }
+
+    const activeIds = getActivePrograms().map((p) => p.id);
+    const daySchedules = (db.schedules || []).filter(
+      (s) => s.dayOfWeek === weekday && activeIds.includes(s.programId),
+    );
+    const dayTasks = (db.tasks || []).filter(
+      (t) => (t.date === dateISO || t.dayOfWeek === weekday) && activeIds.includes(t.programId),
+    );
+    const dayAttendance = (db.attendanceRecords || []).filter(
+      (r) => (r.date || "") === dateISO,
+    );
+
+    const statusColor = (s) =>
+      s === "حاضر"
+        ? "text-emerald-700"
+        : s === "غائب"
+          ? "text-rose-700"
+          : s === "متأخر"
+            ? "text-amber-700"
+            : s === "مستأذن"
+              ? "text-sky-700"
+              : "text-slate-500";
+
+    const attendanceBlock = daySchedules
+      .filter((s) => s.requiresAttendance)
+      .map((sch) => {
+        const students = db.users.filter(
+          (u) => u.role === "student" && u.currentProgramId === sch.programId,
+        );
+        const rows = students
+          .map((st) => {
+            const rec = dayAttendance.find(
+              (r) => r.scheduleId === sch.id && r.studentId === st.id,
+            );
+            const status = rec ? rec.status : "غير مرصود";
+            return `<div class="flex justify-between items-center py-1 border-b border-slate-100 last:border-0">
+                        <span class="text-slate-700">${st.name}</span>
+                        <span class="font-bold ${statusColor(status)}">${status}${rec && rec.auto ? " (تلقائي)" : ""}</span>
+                    </div>`;
+          })
+          .join("");
+        return `<div class="bg-white rounded-2xl border border-slate-200 p-3">
+                    <div class="font-black text-[#0B2533] text-xs mb-1.5">${sch.title} — ${getProgramName(sch.programId)} <span class="text-slate-400 font-medium">(${sch.time})</span></div>
+                    ${rows || '<div class="text-slate-400 text-[11px]">لا يوجد طلاب</div>'}
+                    <button onclick="views.openAttendanceModal('${sch.id}')" class="mt-2 px-3 py-1 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white text-[11px] font-bold rounded-lg transition">فتح/تعديل التحضير لهذا اليوم</button>
+                </div>`;
+      })
+      .join("");
+
+    return `
+        <div class="space-y-4">
+            <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5 border-t-4 border-t-[#0B2533]">
+                <h2 class="text-lg sm:text-xl font-extrabold text-[#0B2533] mb-3"><i class="fa-solid fa-calendar-day text-[#D4A359] ml-2"></i> مراجعة يوم محدد</h2>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="shiftReviewDate(-1)" class="px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-50"><i class="fa-solid fa-chevron-right"></i> اليوم السابق</button>
+                    <input type="date" value="${dateISO}" onchange="setReviewDate(this.value)" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-[#0B2533]">
+                    <button onclick="shiftReviewDate(1)" class="px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-50">اليوم التالي <i class="fa-solid fa-chevron-left"></i></button>
+                    <button onclick="setReviewDate(todayStr())" class="px-3 py-2 bg-teal-50 text-[#169BA2] border border-teal-200 rounded-xl text-xs font-bold">اليوم</button>
+                </div>
+                <div class="mt-2 text-xs text-slate-500 font-bold">${dayNames[weekday]} — ${dateISO}${hijri ? ` — ${hijri}` : ""}</div>
+            </div>
+
+            <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5">
+                <h3 class="font-black text-[#0B2533] text-sm mb-2"><i class="fa-solid fa-calendar-week text-[#D4A359] ml-1.5"></i> جلسات وأنشطة اليوم (${daySchedules.length})</h3>
+                ${
+                  daySchedules.length
+                    ? daySchedules
+                        .map(
+                          (s) => `<div class="py-1.5 border-b border-slate-100 last:border-0 text-xs">
+                            <span class="font-bold text-slate-800">${s.title}</span>
+                            <span class="text-slate-400"> — ${getProgramName(s.programId)} — ${s.time} — ${s.typeLabel || ""}</span>
+                        </div>`,
+                        )
+                        .join("")
+                    : '<div class="text-slate-400 text-xs">لا توجد جلسات في هذا اليوم</div>'
+                }
+            </div>
+
+            <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5">
+                <h3 class="font-black text-[#0B2533] text-sm mb-2"><i class="fa-solid fa-list-check text-[#D4A359] ml-1.5"></i> مهام اليوم (${dayTasks.length})</h3>
+                ${
+                  dayTasks.length
+                    ? dayTasks
+                        .map(
+                          (t) => `<div onclick="views.openTaskModal('${t.id}')" class="py-1.5 border-b border-slate-100 last:border-0 text-xs cursor-pointer hover:bg-slate-50 rounded px-1">
+                            <span class="font-bold text-slate-800">${t.title}</span>
+                            <span class="text-slate-400"> — ${getUserName(t.assignedTo)} — ${t.startTime}</span>
+                            <span class="badge ${t.status === "مكتملة" ? "badge-completed" : t.status === "معفى بعذر" ? "badge-exempt" : "badge-pending"} text-[9px] mr-1">${t.status}</span>
+                        </div>`,
+                        )
+                        .join("")
+                    : '<div class="text-slate-400 text-xs">لا توجد مهام في هذا اليوم</div>'
+                }
+            </div>
+
+            <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5 space-y-2.5">
+                <h3 class="font-black text-[#0B2533] text-sm"><i class="fa-solid fa-clipboard-user text-[#D4A359] ml-1.5"></i> تحضير الطلاب في هذا اليوم</h3>
+                ${attendanceBlock || '<div class="text-slate-400 text-xs">لا توجد جلسات تحضير في هذا اليوم</div>'}
+            </div>
+        </div>
         `;
   },
 
@@ -2154,11 +2571,14 @@ window.views = {
                             <div>
                                 <label class="block font-bold text-slate-700 mb-1">الجهة المستهدفة:</label>
                                 <select id="notif-target-type" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700 focus:outline-none focus:border-[#D4A359]">
-                                    <option value="all">الجميع (كافة البرامج)</option>
+                                    <option value="all">الجميع</option>
                                     <option value="supervisors">جميع المشرفين فقط</option>
-                                    <option value="prog_taseel">طلاب برنامج تأصيل</option>
-                                    <option value="prog_rasookh">طلاب برنامج رسوخ</option>
-                                    <option value="prog_taheel">طلاب برنامج تأهيل</option>
+                                    ${getActivePrograms()
+                                      .map(
+                                        (p) =>
+                                          `<option value="${p.id}">طلاب برنامج ${p.name}</option>`,
+                                      )
+                                      .join("")}
                                 </select>
                             </div>
                         `
@@ -2256,7 +2676,7 @@ window.views = {
                     </div>
                 </div>
 
-                ${this.renderScheduleWidget(supervisor.assignedPrograms[0] || "prog_taseel")}
+                ${this.renderScheduleWidget((supervisor.assignedPrograms || []).find((p) => isProgramActive(p)) || firstActiveProgramId())}
             </div>
         `;
   },
@@ -2435,11 +2855,14 @@ window.views = {
                             <div>
                                 <label class="block font-bold text-slate-700 mb-1">البرنامج المستهدف:</label>
                                 <select id="new-anc-target" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700 focus:outline-none focus:border-[#D4A359]">
-                                    <option value="all">الجميع (كافة البرامج)</option>
+                                    <option value="all">الجميع</option>
                                     <option value="supervisors">جميع المشرفين</option>
-                                    <option value="prog_taseel">طلاب برنامج تأصيل</option>
-                                    <option value="prog_rasookh">طلاب برنامج رسوخ</option>
-                                    <option value="prog_taheel">طلاب برنامج تأهيل</option>
+                                    ${getActivePrograms()
+                                      .map(
+                                        (p) =>
+                                          `<option value="${p.id}">طلاب برنامج ${p.name}</option>`,
+                                      )
+                                      .join("")}
                                 </select>
                             </div>
                             <div>

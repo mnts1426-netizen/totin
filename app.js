@@ -13,9 +13,122 @@ const state = {
   currentRole: null,
   currentView: "portal",
   currentWeekOffset: 0,
-  currentProgramId: "prog_taseel",
+  currentProgramId: "prog_taheel",
   scheduleViewMode: "stacked",
+  // وضع رابط الدخول: "student" (رابط طلاب برنامج محدد) أو "staff" (رابط المشرفين والإدارة) أو null (الرابط العام)
+  portalMode: null,
+  lockedProgramId: null,
+  // تاريخ العرض الحالي لشاشة "مراجعة يوم" الخاصة بالمدير (YYYY-MM-DD محلي)
+  reviewDate: "",
 };
+
+// ===== أدوات مساعدة عامة =====
+
+// البرامج المفعّلة فقط (تأصيل ورسوخ مغلقان ولا يتم العمل عليهما)
+function getActivePrograms() {
+  return (window.db.programs || []).filter((p) => !p.isClosed);
+}
+
+function isProgramActive(programId) {
+  const p = (window.db.programs || []).find((x) => x.id === programId);
+  return Boolean(p && !p.isClosed);
+}
+
+function firstActiveProgramId() {
+  const list = getActivePrograms();
+  return list.length ? list[0].id : "prog_taheel";
+}
+
+// تحويل الأرقام العربية إلى إنجليزية وإزالة الفراغات لتوحيد المقارنة
+function normalizeDigits(v) {
+  if (v === undefined || v === null) return "";
+  const map = {
+    "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
+    "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+  };
+  return String(v)
+    .trim()
+    .replace(/[٠-٩]/g, (d) => map[d])
+    .replace(/\s+/g, "");
+}
+
+// التحقق من تكرار رقم الجوال أو رقم الهوية (لا يُسمح بالتكرار نهائياً)
+function isPhoneTaken(phone, exceptUserId) {
+  const p = normalizeDigits(phone);
+  if (!p) return false;
+  return (window.db.users || []).some(
+    (u) => u.id !== exceptUserId && normalizeDigits(u.phone) === p,
+  );
+}
+
+function isNationalIdTaken(nationalId, exceptUserId) {
+  const n = normalizeDigits(nationalId);
+  if (!n) return false;
+  return (window.db.users || []).some(
+    (u) => u.id !== exceptUserId && normalizeDigits(u.nationalId) === n,
+  );
+}
+
+// إيجاد مستخدم عبر رقم الجوال أو رقم الهوية
+function findUserByPhoneOrId(value) {
+  const v = normalizeDigits(value);
+  if (!v) return null;
+  return (
+    (window.db.users || []).find(
+      (u) =>
+        normalizeDigits(u.phone) === v || normalizeDigits(u.nationalId) === v,
+    ) || null
+  );
+}
+
+function getDefaultLevelId(programId) {
+  const lvl = (window.db.levels || [])
+    .filter((l) => l.programId === programId)
+    .sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+  return lvl ? lvl.id : null;
+}
+
+function getDefaultGroupId(programId) {
+  const g = (window.db.groups || []).find((x) => x.programId === programId);
+  return g ? g.id : null;
+}
+
+function makeId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+}
+
+function persist(...collections) {
+  if (window.store && typeof window.store.save === "function") {
+    window.store.save(...collections);
+  }
+}
+
+// تحديد وضع الرابط من عنوان الصفحة:
+//  - رابط الطلاب لكل برنامج:  index.html?v=student&p=prog_taheel
+//  - رابط المشرفين والإدارة الموحّد: index.html?v=staff
+function applyAccessLinkParams() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const view = (params.get("v") || params.get("portal") || "")
+      .trim()
+      .toLowerCase();
+    const prog = (params.get("p") || params.get("program") || "").trim();
+
+    if (view === "staff" || view === "supervisor" || view === "admin") {
+      state.portalMode = "staff";
+      state.lockedProgramId = null;
+    } else if (view === "student" || prog) {
+      state.portalMode = "student";
+      const match = (window.db.programs || []).find(
+        (p) => p.id === prog || p.name === prog,
+      );
+      state.lockedProgramId = match ? match.id : null;
+      if (match) state.currentProgramId = match.id;
+    }
+  } catch (e) {
+    console.warn("تعذر قراءة إعدادات رابط الدخول:", e);
+  }
+}
 
 // التقاط حدث تثبيت التطبيق PWA
 window.addEventListener("beforeinstallprompt", (e) => {
@@ -29,6 +142,35 @@ function initApp() {
     setTimeout(initApp, 50);
     return;
   }
+
+  // تشغيل طبقة الحفظ (محلي + مزامنة سحابية). عند وصول تحديث من جهاز آخر يُعاد رسم الشاشة الحالية.
+  if (window.store && typeof window.store.init === "function") {
+    window.store.init(() => {
+      try {
+        sweepAutoAbsence();
+      } catch (e) {
+        console.warn(e);
+      }
+      if (state.currentUser) {
+        const stillValid = (window.db.users || []).find(
+          (u) => u.id === state.currentUser.id,
+        );
+        if (!stillValid) {
+          logoutUser();
+          return;
+        }
+        state.currentUser = stillValid;
+        navigateTo(state.currentView);
+        updateNotificationsBadge();
+      } else {
+        navigateTo(state.currentView);
+      }
+    });
+  }
+
+  if (!state.reviewDate) state.reviewDate = todayStr();
+  applyAccessLinkParams();
+  sweepAutoAbsence();
   hideAppControls();
   navigateTo("portal");
 }
@@ -104,7 +246,8 @@ function showAppControls(user) {
 
 // 3. التحقق وتسجيل الدخول
 function handleLoginSubmit(programId) {
-  const userSelect = document.getElementById("login-user-select").value;
+  const selectEl = document.getElementById("login-user-select");
+  const userSelect = selectEl ? selectEl.value : "";
   const phoneInput = document.getElementById("login-phone").value.trim();
   const passInput = document.getElementById("login-pass").value.trim();
 
@@ -112,11 +255,14 @@ function handleLoginSubmit(programId) {
   if (userSelect) {
     user = db.users.find((u) => u.id === userSelect);
   } else {
-    user = db.users.find((u) => u.phone === phoneInput);
+    // الدخول برقم الجوال أو رقم الهوية
+    user = findUserByPhoneOrId(phoneInput);
   }
 
   if (!user) {
-    alert("بيانات الدخول غير صحيحة، يرجى التأكد من رقم الجوال أو اختيار حساب.");
+    alert(
+      "بيانات الدخول غير صحيحة. يرجى التأكد من رقم الجوال أو رقم الهوية.",
+    );
     return;
   }
 
@@ -127,6 +273,23 @@ function handleLoginSubmit(programId) {
 
   if (user.isRestricted) {
     alert("عذراً، هذا الحساب مقيد حالياً. يرجى التواصل مع إدارة المنصة.");
+    return;
+  }
+
+  // حصر نوع الرابط: رابط الطلاب للطلاب فقط، ورابط المشرفين للمشرفين والإدارة فقط
+  if (state.portalMode === "student" && user.role !== "student") {
+    alert("هذا الرابط مخصص للطلاب فقط. يرجى استخدام رابط المشرفين والإدارة.");
+    return;
+  }
+  if (state.portalMode === "staff" && user.role === "student") {
+    alert("هذا الرابط مخصص للمشرفين والإدارة. يرجى استخدام رابط الطلاب الخاص ببرنامجك.");
+    return;
+  }
+
+  // منع تسجيل الدخول عبر برنامج مغلق
+  const loginProg = db.programs.find((p) => p.id === programId);
+  if (loginProg && loginProg.isClosed) {
+    alert(`عذراً، برنامج ${loginProg.name} مغلق حالياً ولا يمكن الدخول إليه.`);
     return;
   }
 
@@ -153,6 +316,13 @@ function logoutUser() {
 
 // 4. اختيار البرنامج والدخول
 function selectProgramPath(progId) {
+  const targetProg = db.programs.find((p) => p.id === progId);
+  if (targetProg && targetProg.isClosed) {
+    alert(
+      `عذراً، برنامج ${targetProg.name} مغلق حالياً ولا يمكن الدخول إليه.`,
+    );
+    return;
+  }
   state.currentProgramId = progId;
   if (!state.currentUser) {
     views.openLoginModal(progId);
@@ -253,6 +423,14 @@ function navigateTo(viewName) {
         ? window.views.renderSettingsView()
         : window.views.renderHome(state.currentUser);
       break;
+    case "day-review":
+      contentArea.innerHTML =
+        window.views.renderDayReviewView &&
+        state.currentUser &&
+        state.currentUser.role === "admin"
+          ? window.views.renderDayReviewView()
+          : window.views.renderHome(state.currentUser);
+      break;
     default:
       contentArea.innerHTML = window.views.renderPortalView();
       break;
@@ -267,47 +445,62 @@ function handleStudentExcelImport(event) {
   const reader = new FileReader();
   reader.onload = function (e) {
     const text = e.target.result;
-    const lines = text.split("\n").filter((l) => l.trim() !== "");
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
     let count = 0;
+    let skipped = 0;
+    const skippedNames = [];
+
+    // الأعمدة المتوقعة: الاسم، رقم الجوال، رقم الهوية، جوال ولي الأمر
+    const defaultProg = getActivePrograms()[0] || db.programs[0];
 
     lines.forEach((line, idx) => {
-      if (idx === 0 && line.includes("اسم")) return;
+      if (idx === 0 && (line.includes("اسم") || line.includes("الاسم"))) return;
       const parts = line.split(",").map((p) => p.trim());
-      if (parts.length >= 2) {
-        const name = parts[0];
-        const phone = parts[1] || `0550000${Date.now().toString().slice(-3)}`;
-        const fatherPhone = parts[2] || phone;
-        const progName = parts[3] || "تأصيل";
-        const prog =
-          db.programs.find((p) => p.name.includes(progName)) || db.programs[1];
+      if (parts.length < 2 || !parts[0]) return;
 
-        const newStudent = {
-          id: `student_${Date.now()}_${count}`,
-          name: name,
-          role: "student",
-          studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
-          phone: phone,
-          fatherPhone: fatherPhone,
-          password: "1234",
-          email: `${phone}@alelm.edu.sa`,
-          avatar: name.substring(0, 2),
-          currentProgramId: prog.id,
-          currentLevelId: "lvl_ts_1",
-          groupId: "grp_ts_101",
-          supervisorId:
-            state.currentUser.id === "admin"
-              ? "supervisor_1"
-              : state.currentUser.id,
-          progress: 0,
-          isRestricted: false,
-        };
+      const name = parts[0];
+      const phone = normalizeDigits(parts[1]);
+      const nationalId = normalizeDigits(parts[2] || "");
+      const fatherPhone = normalizeDigits(parts[3] || parts[1]);
 
-        db.users.push(newStudent);
-        count++;
+      // منع تكرار رقم الجوال أو رقم الهوية نهائياً
+      if (!phone || isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
+        skipped++;
+        skippedNames.push(name);
+        return;
       }
+
+      const newStudent = {
+        id: makeId("student"),
+        name: name,
+        role: "student",
+        studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
+        phone: phone,
+        nationalId: nationalId,
+        fatherPhone: fatherPhone,
+        password: "1234",
+        email: `${phone}@totin.sa`,
+        avatar: name.substring(0, 2),
+        currentProgramId: defaultProg.id,
+        currentLevelId: getDefaultLevelId(defaultProg.id),
+        groupId: getDefaultGroupId(defaultProg.id),
+        supervisorId:
+          state.currentUser.role === "supervisor" ? state.currentUser.id : null,
+        progress: 0,
+        isRestricted: false,
+        createdAt: Date.now(),
+      };
+
+      db.users.push(newStudent);
+      count++;
     });
 
-    alert(`تم استيراد وإضافة (${count}) طالب بنجاح.`);
+    persist("users");
+    let msg = `تم استيراد وإضافة (${count}) طالب بنجاح.`;
+    if (skipped > 0) {
+      msg += `\nتم تجاهل (${skipped}) صف بسبب تكرار رقم الجوال/الهوية أو نقص البيانات: ${skippedNames.join("، ")}`;
+    }
+    alert(msg);
     navigateTo("students");
   };
   reader.readAsText(file);
@@ -320,51 +513,91 @@ function handleSupervisorExcelImport(event) {
   const reader = new FileReader();
   reader.onload = function (e) {
     const text = e.target.result;
-    const lines = text.split("\n").filter((l) => l.trim() !== "");
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
     let count = 0;
+    let skipped = 0;
+    const skippedNames = [];
 
+    const colors = ["#169BA2", "#E59824", "#8AA838", "#9E1B48", "#2B1736"];
+    const defaultProg = getActivePrograms()[0] || db.programs[0];
+
+    // الأعمدة المتوقعة: الاسم، رقم الجوال، رقم الهوية
     lines.forEach((line, idx) => {
-      if (idx === 0 && line.includes("اسم")) return;
+      if (idx === 0 && (line.includes("اسم") || line.includes("الاسم"))) return;
       const parts = line.split(",").map((p) => p.trim());
-      if (parts.length >= 2) {
-        const name = parts[0];
-        const phone = parts[1];
-        const progName = parts[2] || "تأصيل";
-        const prog =
-          db.programs.find((p) => p.name.includes(progName)) || db.programs[1];
+      if (parts.length < 2 || !parts[0]) return;
 
-        const newSupervisor = {
-          id: `supervisor_${Date.now()}_${count}`,
-          name: name,
-          role: "supervisor",
-          phone: phone,
-          password: "1234",
-          email: `${phone}@alelm.edu.sa`,
-          avatar: name.substring(0, 2),
-          color: "#169BA2",
-          assignedPrograms: [prog.id],
-          assignedGroups: [],
-          isRestricted: false,
-        };
+      const name = parts[0];
+      const phone = normalizeDigits(parts[1]);
+      const nationalId = normalizeDigits(parts[2] || "");
 
-        db.users.push(newSupervisor);
-        count++;
+      if (!phone || isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
+        skipped++;
+        skippedNames.push(name);
+        return;
       }
+
+      const newSupervisor = {
+        id: makeId("supervisor"),
+        name: name,
+        role: "supervisor",
+        phone: phone,
+        nationalId: nationalId,
+        password: "1234",
+        email: `${phone}@totin.sa`,
+        avatar: name.substring(0, 2),
+        color:
+          colors[db.users.filter((u) => u.role === "supervisor").length % colors.length],
+        assignedPrograms: [defaultProg.id],
+        assignedGroups: [],
+        isRestricted: false,
+        createdAt: Date.now(),
+      };
+
+      db.users.push(newSupervisor);
+      count++;
     });
 
-    alert(`تم استيراد وإضافة (${count}) مشرف بنجاح.`);
+    persist("users");
+    let msg = `تم استيراد وإضافة (${count}) مشرف بنجاح.`;
+    if (skipped > 0) {
+      msg += `\nتم تجاهل (${skipped}) صف بسبب تكرار رقم الجوال/الهوية أو نقص البيانات: ${skippedNames.join("، ")}`;
+    }
+    alert(msg);
     navigateTo("supervisors");
   };
   reader.readAsText(file);
 }
 
-// 7. نظام التحضير المتعدد والغياب التلقائي
+// 7. نظام التحضير المتعدد والغياب التلقائي نهاية اليوم
+
+// سلسلة تاريخ محلية YYYY-MM-DD (بدون تحويل UTC حتى لا تنزلق التواريخ للمستخدمين شرق غرينتش)
+function localDateStr(dt) {
+  const d = dt || new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function todayStr() {
+  return localDateStr(new Date());
+}
+
+// تاريخ سياق التحضير: تاريخ "مراجعة يوم" إذا كان المدير داخلها، وإلا تاريخ اليوم
+function attendanceContextDate() {
+  return state.currentView === "day-review" && state.reviewDate
+    ? state.reviewDate
+    : todayStr();
+}
+
 function toggleSelectAllAttendance(masterCheckbox) {
   const checkboxes = document.querySelectorAll(".stu-att-checkbox");
   checkboxes.forEach((cb) => (cb.checked = masterCheckbox.checked));
 }
 
-function bulkRecordAttendance(scheduleId, status) {
+function bulkRecordAttendance(scheduleId, status, date) {
+  const d = date || attendanceContextDate();
   const selectedBoxes = document.querySelectorAll(".stu-att-checkbox:checked");
   if (selectedBoxes.length === 0) {
     alert("يرجى تحديد طالب واحد على الأقل للتحضير الجماعي!");
@@ -372,7 +605,7 @@ function bulkRecordAttendance(scheduleId, status) {
   }
 
   selectedBoxes.forEach((cb) => {
-    recordAttendance(scheduleId, cb.value, status);
+    recordAttendance(scheduleId, cb.value, status, d);
   });
 
   alert(`تم رصد حالة (${status}) لعدد (${selectedBoxes.length}) طالب.`);
@@ -380,7 +613,8 @@ function bulkRecordAttendance(scheduleId, status) {
   views.openAttendanceModal(scheduleId);
 }
 
-function markRemainingAbsent(scheduleId) {
+function markRemainingAbsent(scheduleId, date) {
+  const d = date || attendanceContextDate();
   const schedule = db.schedules.find((s) => s.id === scheduleId);
   if (!schedule) return;
 
@@ -393,17 +627,78 @@ function markRemainingAbsent(scheduleId) {
   let markedCount = 0;
 
   students.forEach((st) => {
-    const currentStatus = getStudentAttendanceStatus(scheduleId, st.id);
+    const currentStatus = getStudentAttendanceStatus(scheduleId, st.id, d);
     if (currentStatus === "غير محدد") {
-      recordAttendance(scheduleId, st.id, "غائب");
+      recordAttendance(scheduleId, st.id, "غائب", d);
       markedCount++;
     }
   });
 
-  alert(`تم احتساب (${markedCount}) طالب كـ (غائب) تلقائياً.`);
+  alert(`تم احتساب (${markedCount}) طالب كـ (غائب).`);
   if (window.views && window.views.updateAttendanceModalView) {
     views.updateAttendanceModalView(scheduleId);
   }
+}
+
+// تغييب تلقائي: نهاية كل يوم، أي طالب لم يُرصد في جلسة تتطلب تحضيراً يُحتسب غائباً
+// (يشمل حالة عدم تحضير أي أحد إطلاقاً). يُطبّق على الأيام السابقة فقط.
+function sweepAutoAbsence() {
+  if (!Array.isArray(db.attendanceRecords)) db.attendanceRecords = [];
+  const today = new Date();
+  const todayISO = todayStr();
+  let added = 0;
+
+  const activeProgramIds = getActivePrograms().map((p) => p.id);
+  const attSchedules = (db.schedules || []).filter(
+    (s) => s.requiresAttendance && activeProgramIds.includes(s.programId),
+  );
+  if (attSchedules.length === 0) return;
+
+  // آخر 21 يوماً السابقة فقط
+  for (let back = 1; back <= 21; back++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - back);
+    const iso = localDateStr(d);
+    if (iso >= todayISO) continue;
+    const weekday = d.getDay();
+
+    attSchedules
+      .filter((s) => s.dayOfWeek === weekday)
+      .forEach((sch) => {
+        const students = db.users.filter(
+          (u) =>
+            u.role === "student" &&
+            u.currentProgramId === sch.programId &&
+            !u.isRestricted &&
+            // لا نُغيّب طالباً أُضيف بعد ذلك اليوم
+            (!u.createdAt || u.createdAt <= d.getTime() + 86400000),
+        );
+        students.forEach((st) => {
+          const exists = db.attendanceRecords.some(
+            (r) =>
+              r.scheduleId === sch.id &&
+              r.studentId === st.id &&
+              (r.date || "") === iso,
+          );
+          if (!exists) {
+            db.attendanceRecords.push({
+              id: `att_${sch.id}_${st.id}_${iso}`,
+              scheduleId: sch.id,
+              studentId: st.id,
+              programId: sch.programId,
+              date: iso,
+              status: "غائب",
+              auto: true,
+              updatedAt: `${iso} (تلقائي نهاية اليوم)`,
+              recordedBy: "system",
+            });
+            added++;
+          }
+        });
+      });
+  }
+
+  if (added > 0) persist("attendanceRecords");
 }
 
 // 8. تزامن التواريخ الهجرية والميلادية
@@ -433,7 +728,7 @@ function getWeekDateDetails(dayOfWeekIndex, weekOffset = 0) {
   return {
     gregorian: gregStr,
     hijri: hijriStr,
-    fullDate: targetDate.toISOString().split("T")[0],
+    fullDate: localDateStr(targetDate),
   };
 }
 
@@ -486,6 +781,7 @@ function promoteStudent(studentId) {
     );
   }
 
+  persist("users");
   navigateTo("students");
 }
 
@@ -496,37 +792,67 @@ function toggleUserRestriction(userId) {
 
   user.isRestricted = !user.isRestricted;
   const statusText = user.isRestricted ? "تقييد" : "فك تقييد";
+  persist("users");
   alert(`تم ${statusText} حساب (${user.name}) بنجاح.`);
 
   if (user.role === "student") navigateTo("students");
   else if (user.role === "supervisor") navigateTo("supervisors");
+  else navigateTo(state.currentView);
 }
 
-// 12. اعتماد وتعديل بيانات الطلاب
+// 12. اعتماد وتعديل بيانات المستخدمين وكلمات المرور (تحتاج اعتماد المدير)
 function approveProfileEdit(editId) {
   const editIndex = db.pendingProfileEdits.findIndex((e) => e.id === editId);
   if (editIndex === -1) return;
 
   const req = db.pendingProfileEdits[editIndex];
-  const student = db.users.find((u) => u.id === req.studentId);
+  const targetId = req.userId || req.studentId;
+  const targetUser = db.users.find((u) => u.id === targetId);
 
-  if (student) {
-    if (req.newPhone) student.phone = req.newPhone;
-    if (req.newFatherPhone) student.fatherPhone = req.newFatherPhone;
-    if (req.newEmail) student.email = req.newEmail;
+  if (targetUser) {
+    // منع اعتماد رقم جوال أو هوية مكرر
+    if (req.newPhone && isPhoneTaken(req.newPhone, targetUser.id)) {
+      alert("تعذر الاعتماد: رقم الجوال الجديد مستخدم لحساب آخر.");
+      return;
+    }
+    if (req.newNationalId && isNationalIdTaken(req.newNationalId, targetUser.id)) {
+      alert("تعذر الاعتماد: رقم الهوية الجديد مستخدم لحساب آخر.");
+      return;
+    }
+    if (req.newPhone) targetUser.phone = normalizeDigits(req.newPhone);
+    if (req.newNationalId) targetUser.nationalId = normalizeDigits(req.newNationalId);
+    if (req.newFatherPhone)
+      targetUser.fatherPhone = normalizeDigits(req.newFatherPhone);
+    if (req.newEmail) targetUser.email = req.newEmail;
+    if (req.newName) targetUser.name = req.newName;
+    if (req.newPassword) targetUser.password = req.newPassword;
+
+    db.notifications.unshift({
+      id: makeId("notif"),
+      userId: targetUser.id,
+      category: "اعتماد تعديل",
+      title: "تم اعتماد طلبك",
+      message: req.newPassword
+        ? "تم اعتماد تغيير كلمة المرور الخاصة بك."
+        : "تم اعتماد تعديل بياناتك.",
+      date: "الآن",
+      isRead: false,
+    });
   }
 
   db.pendingProfileEdits.splice(editIndex, 1);
-  alert(`تم اعتماد وتحديث بيانات الطالب (${req.studentName}) بنجاح.`);
-  navigateTo("students");
+  persist("users", "pendingProfileEdits", "notifications");
+  alert(`تم اعتماد طلب (${req.studentName || req.userName || "المستخدم"}).`);
+  navigateTo(state.currentView);
 }
 
 function rejectProfileEdit(editId) {
-  if (!confirm("هل أنت متأكد من رفض طلب تعديل البيانات؟")) return;
+  if (!confirm("هل أنت متأكد من رفض هذا الطلب؟")) return;
   db.pendingProfileEdits = db.pendingProfileEdits.filter(
     (e) => e.id !== editId,
   );
-  navigateTo("students");
+  persist("pendingProfileEdits");
+  navigateTo(state.currentView);
 }
 
 // 13. استرجاع المهام
@@ -566,6 +892,7 @@ function exemptTask(taskId, reason) {
   });
 
   closeModal("task-modal");
+  persist("tasks", "notifications");
   alert("تم اعتماد الإعفاء للمهمة بنجاح.");
   navigateTo(state.currentView);
 }
@@ -576,31 +903,39 @@ function acceptStudentRequest(reqId) {
   if (reqIndex === -1) return;
 
   const req = db.registrationRequests[reqIndex];
-  const defaultLevel = db.levels.find(
-    (l) => l.programId === req.programId && l.order === 1,
-  );
+  const progId = isProgramActive(req.programId)
+    ? req.programId
+    : firstActiveProgramId();
+
+  if (isPhoneTaken(req.phone) || (req.nationalId && isNationalIdTaken(req.nationalId))) {
+    alert("تعذر القبول: رقم الجوال أو رقم الهوية مستخدم لحساب آخر.");
+    return;
+  }
 
   const newStudent = {
-    id: `student_${Date.now()}`,
+    id: makeId("student"),
     name: req.name,
     role: "student",
     studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
-    phone: req.phone,
-    fatherPhone: req.fatherPhone,
+    phone: normalizeDigits(req.phone),
+    nationalId: normalizeDigits(req.nationalId || ""),
+    fatherPhone: normalizeDigits(req.fatherPhone || req.phone),
     password: "1234",
-    email: `${req.phone}@alelm.edu.sa`,
+    email: `${normalizeDigits(req.phone)}@totin.sa`,
     avatar: req.name.substring(0, 2),
-    currentProgramId: req.programId,
-    currentLevelId: defaultLevel ? defaultLevel.id : "lvl_ts_1",
-    groupId: "grp_ts_101",
+    currentProgramId: progId,
+    currentLevelId: getDefaultLevelId(progId),
+    groupId: getDefaultGroupId(progId),
     supervisorId:
-      state.currentUser.id === "admin" ? "supervisor_1" : state.currentUser.id,
+      state.currentUser.role === "supervisor" ? state.currentUser.id : null,
     progress: 0,
     isRestricted: false,
+    createdAt: Date.now(),
   };
 
   db.users.push(newStudent);
   db.registrationRequests.splice(reqIndex, 1);
+  persist("users", "registrationRequests");
   alert(`تم قبول الطالب (${req.name}) بنجاح.`);
   navigateTo("students");
 }
@@ -610,37 +945,57 @@ function rejectStudentRequest(reqId) {
   db.registrationRequests = db.registrationRequests.filter(
     (r) => r.id !== reqId,
   );
+  persist("registrationRequests");
   navigateTo("students");
 }
 
-// 16. إضافة وتعديل الطلاب والمشرفين
+// 16. إضافة وتعديل الطلاب والمشرفين والإداريين
 function addNewStudent(data) {
-  const defaultLevel = db.levels.find(
-    (l) => l.programId === data.currentProgramId && l.order === 1,
-  );
+  const phone = normalizeDigits(data.phone);
+  const nationalId = normalizeDigits(data.nationalId || "");
+
+  if (!phone) {
+    alert("رقم الجوال مطلوب.");
+    return;
+  }
+  if (isPhoneTaken(phone)) {
+    alert("رقم الجوال مستخدم مسبقاً لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+  if (nationalId && isNationalIdTaken(nationalId)) {
+    alert("رقم الهوية مستخدم مسبقاً لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+
+  const progId = isProgramActive(data.currentProgramId)
+    ? data.currentProgramId
+    : firstActiveProgramId();
 
   const newStudent = {
-    id: `student_${Date.now()}`,
+    id: makeId("student"),
     name: data.name,
     role: "student",
     studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
-    phone: data.phone,
-    fatherPhone: data.fatherPhone,
+    phone: phone,
+    nationalId: nationalId,
+    fatherPhone: normalizeDigits(data.fatherPhone || ""),
     password: "1234",
-    email: `${data.phone}@alelm.edu.sa`,
-    avatar: data.name.substring(0, 2),
-    currentProgramId: data.currentProgramId,
-    currentLevelId: defaultLevel ? defaultLevel.id : "lvl_ts_1",
-    groupId: "grp_ts_101",
+    email: `${phone}@totin.sa`,
+    avatar: (data.name || "طا").substring(0, 2),
+    currentProgramId: progId,
+    currentLevelId: getDefaultLevelId(progId),
+    groupId: getDefaultGroupId(progId),
     supervisorId:
-      state.currentUser.id === "admin" ? "supervisor_1" : state.currentUser.id,
+      state.currentUser.role === "supervisor" ? state.currentUser.id : null,
     progress: 0,
     isRestricted: false,
+    createdAt: Date.now(),
   };
 
   db.users.push(newStudent);
+  persist("users");
   closeModal("add-student-modal");
-  alert("تم إضافة الطالب بنجاح.");
+  alert("تم إضافة الطالب بنجاح. كلمة المرور الافتراضية: 1234");
   navigateTo("students");
 }
 
@@ -648,115 +1003,341 @@ function updateStudentData(studentId, data) {
   const student = db.users.find((u) => u.id === studentId);
   if (!student) return;
 
+  const phone = normalizeDigits(data.phone);
+  const nationalId = normalizeDigits(data.nationalId || "");
+  if (phone && isPhoneTaken(phone, studentId)) {
+    alert("رقم الجوال مستخدم لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+  if (nationalId && isNationalIdTaken(nationalId, studentId)) {
+    alert("رقم الهوية مستخدم لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+
   student.name = data.name;
-  student.phone = data.phone;
-  student.fatherPhone = data.fatherPhone;
-  student.currentProgramId = data.currentProgramId;
+  student.phone = phone;
+  if (data.nationalId !== undefined) student.nationalId = nationalId;
+  student.fatherPhone = normalizeDigits(data.fatherPhone || "");
+  if (isProgramActive(data.currentProgramId))
+    student.currentProgramId = data.currentProgramId;
   if (data.password) student.password = data.password;
 
+  persist("users");
   closeModal("edit-student-modal");
   alert(`تم تحديث بيانات الطالب (${student.name}) بنجاح.`);
   navigateTo("students");
 }
 
+function deleteStudent(studentId) {
+  const student = db.users.find((u) => u.id === studentId);
+  if (!student) return;
+  if (!confirm(`هل أنت متأكد من حذف الطالب (${student.name}) نهائياً؟`)) return;
+  db.users = db.users.filter((u) => u.id !== studentId);
+  db.attendanceRecords = (db.attendanceRecords || []).filter(
+    (r) => r.studentId !== studentId,
+  );
+  db.pendingProfileEdits = (db.pendingProfileEdits || []).filter(
+    (e) => (e.userId || e.studentId) !== studentId,
+  );
+  persist("users", "attendanceRecords", "pendingProfileEdits");
+  alert("تم حذف الطالب نهائياً.");
+  navigateTo("students");
+}
+
 function addNewSupervisor(data) {
+  const phone = normalizeDigits(data.phone);
+  const nationalId = normalizeDigits(data.nationalId || "");
+
+  if (!phone) {
+    alert("رقم الجوال مطلوب.");
+    return;
+  }
+  if (isPhoneTaken(phone)) {
+    alert("رقم الجوال مستخدم مسبقاً لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+  if (nationalId && isNationalIdTaken(nationalId)) {
+    alert("رقم الهوية مستخدم مسبقاً لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+
   const colors = ["#169BA2", "#E59824", "#8AA838", "#9E1B48", "#2B1736"];
   const assignedColor =
     colors[
       db.users.filter((u) => u.role === "supervisor").length % colors.length
     ];
 
+  const assignedPrograms = (data.assignedPrograms || []).filter((p) =>
+    isProgramActive(p),
+  );
+
   const newSupervisor = {
-    id: `supervisor_${Date.now()}`,
+    id: makeId("supervisor"),
     name: data.name,
     role: "supervisor",
-    phone: data.phone,
+    phone: phone,
+    nationalId: nationalId,
     password: "1234",
-    email: `${data.phone}@alelm.edu.sa`,
-    avatar: data.name.substring(0, 2),
+    email: `${phone}@totin.sa`,
+    avatar: (data.name || "مش").substring(0, 2),
     color: assignedColor,
-    assignedPrograms: data.assignedPrograms,
+    assignedPrograms: assignedPrograms.length
+      ? assignedPrograms
+      : [firstActiveProgramId()],
     assignedGroups: [],
     isRestricted: false,
+    createdAt: Date.now(),
   };
 
   db.users.push(newSupervisor);
+  persist("users");
   closeModal("add-supervisor-modal");
-  alert("تم إضافة المشرف بنجاح.");
+  alert("تم إضافة المشرف بنجاح. كلمة المرور الافتراضية: 1234");
+  navigateTo("supervisors");
+}
+
+function updateSupervisorData(supervisorId, data) {
+  const sup = db.users.find((u) => u.id === supervisorId);
+  if (!sup) return;
+
+  const phone = normalizeDigits(data.phone);
+  const nationalId = normalizeDigits(data.nationalId || "");
+  if (phone && isPhoneTaken(phone, supervisorId)) {
+    alert("رقم الجوال مستخدم لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+  if (nationalId && isNationalIdTaken(nationalId, supervisorId)) {
+    alert("رقم الهوية مستخدم لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+
+  sup.name = data.name;
+  sup.phone = phone;
+  if (data.nationalId !== undefined) sup.nationalId = nationalId;
+  if (Array.isArray(data.assignedPrograms))
+    sup.assignedPrograms = data.assignedPrograms.filter((p) => isProgramActive(p));
+  if (data.password) sup.password = data.password;
+
+  persist("users");
+  closeModal("edit-supervisor-modal");
+  alert(`تم تحديث بيانات المشرف (${sup.name}) بنجاح.`);
   navigateTo("supervisors");
 }
 
 function deleteSupervisor(supervisorId) {
   if (!confirm("هل أنت متأكد من حذف هذا المشرف نهائياً؟")) return;
   db.users = db.users.filter((u) => u.id !== supervisorId);
+  // فك ارتباط الطلاب بهذا المشرف
+  (db.users || []).forEach((u) => {
+    if (u.role === "student" && u.supervisorId === supervisorId)
+      u.supervisorId = null;
+  });
+  persist("users");
   navigateTo("supervisors");
 }
 
-// 17. تحديث الملف الشخصي
-function updateProfile() {
-  const name = document.getElementById("set-user-name").value;
-  const phone = document.getElementById("set-user-phone").value;
-  const email = document.getElementById("set-user-email").value;
-
-  if (state.currentUser.role === "student") {
-    db.pendingProfileEdits.push({
-      id: `edit_${Date.now()}`,
-      studentId: state.currentUser.id,
-      studentName: state.currentUser.name,
-      newPhone: phone,
-      newEmail: email,
-      requestDate: new Date().toISOString().split("T")[0],
-      status: "بانتظار الاعتماد",
-    });
-    alert("تم إرسال طلب التعديل للاعتماد.");
-  } else {
-    state.currentUser.name = name;
-    state.currentUser.phone = phone;
-    state.currentUser.email = email;
-    document.getElementById("header-user-name").innerText = name;
-    alert("تم حفظ البيانات بنجاح.");
+// إضافة حساب إداري جديد (المدير فقط)
+function addNewAdmin(data) {
+  if (!state.currentUser || state.currentUser.role !== "admin") {
+    alert("غير مصرح لك بإضافة إداريين.");
+    return;
   }
+  const phone = normalizeDigits(data.phone);
+  const nationalId = normalizeDigits(data.nationalId || "");
+
+  if (!phone) {
+    alert("رقم الجوال مطلوب.");
+    return;
+  }
+  if (isPhoneTaken(phone)) {
+    alert("رقم الجوال مستخدم مسبقاً لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+  if (nationalId && isNationalIdTaken(nationalId)) {
+    alert("رقم الهوية مستخدم مسبقاً لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+
+  const newAdmin = {
+    id: makeId("admin"),
+    name: data.name,
+    role: "admin",
+    phone: phone,
+    nationalId: nationalId,
+    password: "1234",
+    email: `${phone}@totin.sa`,
+    avatar: (data.name || "مد").substring(0, 2),
+    color: "#0B2533",
+    isRestricted: false,
+    createdAt: Date.now(),
+  };
+
+  db.users.push(newAdmin);
+  persist("users");
+  closeModal("add-admin-modal");
+  alert("تم إضافة الحساب الإداري بنجاح. كلمة المرور الافتراضية: 1234");
+  navigateTo("supervisors");
 }
 
-// 18. نظام التحضير الذكي
-function recordAttendance(scheduleId, studentId, status) {
-  if (!db.attendanceRecords) db.attendanceRecords = [];
+function deleteAdmin(adminId) {
+  if (adminId === "admin") {
+    alert("لا يمكن حذف حساب المدير الرئيسي.");
+    return;
+  }
+  const admins = db.users.filter((u) => u.role === "admin");
+  if (admins.length <= 1) {
+    alert("لا يمكن حذف آخر حساب إداري في المنصة.");
+    return;
+  }
+  if (!confirm("هل أنت متأكد من حذف هذا الحساب الإداري نهائياً؟")) return;
+  db.users = db.users.filter((u) => u.id !== adminId);
+  persist("users");
+  navigateTo("supervisors");
+}
 
-  let record = db.attendanceRecords.find(
-    (r) => r.scheduleId === scheduleId && r.studentId === studentId,
-  );
+// 17. تحديث الملف الشخصي (تغيير الاسم/الجوال/كلمة المرور يحتاج اعتماد المدير لغير الإداريين)
+function updateProfile() {
+  const nameEl = document.getElementById("set-user-name");
+  const phoneEl = document.getElementById("set-user-phone");
+  const emailEl = document.getElementById("set-user-email");
+  const passEl = document.getElementById("set-user-pass");
+  const idEl = document.getElementById("set-user-nid");
+
+  const name = nameEl ? nameEl.value.trim() : state.currentUser.name;
+  const phone = phoneEl ? normalizeDigits(phoneEl.value) : state.currentUser.phone;
+  const email = emailEl ? emailEl.value.trim() : state.currentUser.email;
+  const nationalId = idEl
+    ? normalizeDigits(idEl.value)
+    : state.currentUser.nationalId;
+  const newPass = passEl ? passEl.value.trim() : "";
+
+  const me = state.currentUser;
+
+  // منع التكرار (فحص مبكر قبل الاعتماد أيضاً)
+  if (phone && isPhoneTaken(phone, me.id)) {
+    alert("رقم الجوال مستخدم لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+  if (nationalId && isNationalIdTaken(nationalId, me.id)) {
+    alert("رقم الهوية مستخدم لحساب آخر. لا يمكن تكراره.");
+    return;
+  }
+
+  if (me.role === "admin") {
+    // الإداري يعدّل مباشرة
+    me.name = name;
+    me.phone = phone;
+    me.email = email;
+    if (nationalId) me.nationalId = nationalId;
+    if (newPass) me.password = newPass;
+    const hdr = document.getElementById("header-user-name");
+    if (hdr) hdr.innerText = name;
+    persist("users");
+    alert("تم حفظ البيانات بنجاح.");
+    navigateTo("settings");
+    return;
+  }
+
+  // الطالب/المشرف: طلب يحتاج اعتماد المدير
+  const request = {
+    id: makeId("edit"),
+    userId: me.id,
+    userName: me.name,
+    userRole: me.role,
+    studentId: me.id, // توافق مع الكود القديم
+    studentName: me.name,
+    requestDate: todayStr(),
+    status: "بانتظار الاعتماد",
+  };
+  if (name && name !== me.name) request.newName = name;
+  if (phone && phone !== me.phone) request.newPhone = phone;
+  if (nationalId && nationalId !== me.nationalId)
+    request.newNationalId = nationalId;
+  if (email && email !== me.email) request.newEmail = email;
+  if (newPass) request.newPassword = newPass;
+
+  if (
+    !request.newName &&
+    !request.newPhone &&
+    !request.newNationalId &&
+    !request.newEmail &&
+    !request.newPassword
+  ) {
+    alert("لا يوجد تغيير لإرساله.");
+    return;
+  }
+
+  db.pendingProfileEdits.push(request);
+  db.notifications.unshift({
+    id: makeId("notif"),
+    userId: "admin",
+    category: "طلب اعتماد",
+    title: request.newPassword ? "طلب تغيير كلمة مرور" : "طلب تعديل بيانات",
+    message: `${me.name} يطلب ${request.newPassword ? "تغيير كلمة المرور" : "تعديل بياناته"}.`,
+    date: "الآن",
+    isRead: false,
+  });
+  persist("pendingProfileEdits", "notifications");
+  alert("تم إرسال طلبك للاعتماد من الإدارة.");
+  navigateTo("settings");
+}
+
+// 18. نظام التحضير الذكي (كل سجل مرتبط بتاريخ محدد)
+function recordAttendance(scheduleId, studentId, status, date) {
+  if (!db.attendanceRecords) db.attendanceRecords = [];
+  const d = date || attendanceContextDate();
+
+  const schedule = (db.schedules || []).find((s) => s.id === scheduleId);
   const now = new Date();
   const timeStr = `${now.toLocaleDateString("ar-SA")} - ${now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`;
+
+  let record = db.attendanceRecords.find(
+    (r) =>
+      r.scheduleId === scheduleId &&
+      r.studentId === studentId &&
+      (r.date || "") === d,
+  );
 
   if (record) {
     record.status = status;
     record.updatedAt = timeStr;
-    record.recordedBy = state.currentUser.id;
+    record.auto = false;
+    record.recordedBy = state.currentUser ? state.currentUser.id : "system";
   } else {
     db.attendanceRecords.push({
-      id: `att_${Date.now()}_${studentId}`,
+      id: `att_${scheduleId}_${studentId}_${d}`,
       scheduleId: scheduleId,
       studentId: studentId,
+      programId: schedule ? schedule.programId : null,
+      date: d,
       status: status,
+      auto: false,
       updatedAt: timeStr,
-      recordedBy: state.currentUser.id,
+      recordedBy: state.currentUser ? state.currentUser.id : "system",
     });
   }
+
+  persist("attendanceRecords");
 
   if (window.views && window.views.updateAttendanceModalView) {
     window.views.updateAttendanceModalView(scheduleId);
   }
 }
 
-function getStudentAttendanceStatus(scheduleId, studentId) {
+function getStudentAttendanceStatus(scheduleId, studentId, date) {
   if (!db.attendanceRecords) return "غير محدد";
+  const d = date || attendanceContextDate();
   const record = db.attendanceRecords.find(
-    (r) => r.scheduleId === scheduleId && r.studentId === studentId,
+    (r) =>
+      r.scheduleId === scheduleId &&
+      r.studentId === studentId &&
+      (r.date || "") === d,
   );
   return record ? record.status : "غير محدد";
 }
 
-function getUnmarkedAttendanceCount(scheduleId, programId) {
+function getUnmarkedAttendanceCount(scheduleId, programId, date) {
+  const d = date || attendanceContextDate();
   const students = db.users.filter(
     (u) =>
       u.role === "student" &&
@@ -765,7 +1346,7 @@ function getUnmarkedAttendanceCount(scheduleId, programId) {
   );
   let unmarked = 0;
   students.forEach((s) => {
-    const st = getStudentAttendanceStatus(scheduleId, s.id);
+    const st = getStudentAttendanceStatus(scheduleId, s.id, d);
     if (st === "غير محدد") unmarked++;
   });
   return unmarked;
@@ -789,6 +1370,7 @@ function delegateTask(taskId, newSupervisorId) {
   task.assignedTo = newSupervisor.id;
   task.delegatedFrom = previousAssigneeName;
 
+  persist("tasks");
   closeModal("task-modal");
   updateNotificationsBadge();
   navigateTo(state.currentView);
@@ -807,17 +1389,24 @@ function toggleTaskCompletion(taskId) {
     task.completedAt = `${now.toLocaleDateString("ar-SA")} - ${now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`;
   }
 
+  persist("tasks");
   closeModal("task-modal");
   navigateTo(state.currentView);
 }
 
 function addNewTask(taskData) {
+  // تأصيل ورسوخ مغلقان: لا تُنشأ مهام لهما
+  if (!isProgramActive(taskData.programId)) {
+    alert("لا يمكن إضافة مهام لبرنامج مغلق. البرامج المفعّلة فقط.");
+    return;
+  }
+
   const newTask = {
-    id: `tsk_${Date.now()}`,
+    id: makeId("tsk"),
     title: taskData.title,
     programId: taskData.programId,
     dayOfWeek: parseInt(taskData.dayOfWeek),
-    date: taskData.date || "2026-08-30",
+    date: taskData.date || todayStr(),
     startTime: taskData.startTime || "05:00 م",
     endTime: taskData.endTime || "06:00 م",
     assigneeRole: taskData.assigneeRole || "supervisor",
@@ -833,9 +1422,20 @@ function addNewTask(taskData) {
     exemptionReason: null,
     createdBy: state.currentUser.id,
     description: taskData.description || "",
+    createdAt: Date.now(),
   };
 
   db.tasks.push(newTask);
+  db.notifications.unshift({
+    id: makeId("notif"),
+    userId: newTask.assignedTo,
+    category: "تكليف بمهمة",
+    title: "تم تكليفك بمهمة جديدة",
+    message: newTask.title,
+    date: "الآن",
+    isRead: false,
+  });
+  persist("tasks", "notifications");
   closeModal("add-task-modal");
   updateNotificationsBadge();
   navigateTo(state.currentView);
@@ -879,8 +1479,42 @@ function sendTargetedNotification(data) {
   });
 
   closeModal("send-notif-modal");
+  persist("notifications");
   updateNotificationsBadge();
   alert("تم إرسال الإشعار بنجاح.");
+}
+
+// إضافة إعلان جديد للوحة الإعلانات
+function addNewAnnouncement(data) {
+  if (!db.announcements) db.announcements = [];
+  db.announcements.unshift({
+    id: makeId("anc"),
+    title: data.title,
+    content: data.content,
+    publisher: state.currentUser ? state.currentUser.name : "الإدارة",
+    targetGroup: data.targetGroup || "all",
+    mediaType: data.mediaType || "none",
+    mediaUrl: data.mediaUrl || "",
+    date: todayStr(),
+    priority: data.priority || "عادي",
+  });
+  persist("announcements");
+  closeModal("add-announcement-modal");
+  alert("تم نشر الإعلان بنجاح.");
+  navigateTo("announcements");
+}
+
+// ===== مراجعة يوم محدد (المدير فقط) =====
+function setReviewDate(dateStr) {
+  if (dateStr) state.reviewDate = dateStr;
+  navigateTo("day-review");
+}
+
+function shiftReviewDate(deltaDays) {
+  const d = new Date((state.reviewDate || todayStr()) + "T00:00:00");
+  d.setDate(d.getDate() + deltaDays);
+  state.reviewDate = localDateStr(d);
+  navigateTo("day-review");
 }
 
 // 21. دوال مساعدة
@@ -962,6 +1596,7 @@ function markAllNotificationsRead() {
       n.isRead = true;
     }
   });
+  persist("notifications");
   updateNotificationsBadge();
   renderNotificationsList();
 }
