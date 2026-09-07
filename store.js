@@ -113,8 +113,9 @@ window.store = (function () {
         });
         applyingRemote = false;
         // تأكد من وجود حساب المدير دائماً
-        ensureAdmin();
+        const addedAdmin = ensureAdmin();
         saveLocal();
+        if (addedAdmin) pushCollection("users");
         notify();
       },
       (err) => {
@@ -131,8 +132,12 @@ window.store = (function () {
           window.__DB_SEED__.users &&
           window.__DB_SEED__.users.find((u) => u.role === "admin")) ||
         null;
-      if (seedAdmin) window.db.users.unshift(JSON.parse(JSON.stringify(seedAdmin)));
+      if (seedAdmin) {
+        window.db.users.unshift(JSON.parse(JSON.stringify(seedAdmin)));
+        return true;
+      }
     }
+    return false;
   }
 
   return {
