@@ -103,6 +103,22 @@ function persist(...collections) {
   }
 }
 
+// هل المستخدم في منتصف كتابة داخل نموذج أو نافذة مفتوحة؟ (لتفادي مسح إدخاله عند وصول تحديث سحابي)
+function isUserBusyEditing() {
+  // نافذة منبثقة مُدرجة ديناميكياً (كلها fixed inset-0 وليست مخفية)
+  const overlays = document.querySelectorAll(".fixed.inset-0");
+  for (const o of overlays) {
+    if (o.id === "sidebar-backdrop") continue;
+    if (!o.classList.contains("hidden")) return true;
+  }
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = (el.tagName || "").toLowerCase();
+  if (tag !== "input" && tag !== "textarea" && tag !== "select") return false;
+  // نتجاهل حقول البحث/الاختيار السريعة التي لا تُفقد بيانات مهمة
+  return true;
+}
+
 // تحديد وضع الرابط من عنوان الصفحة:
 //  - رابط الطلاب لكل برنامج:  index.html?v=student&p=prog_taheel
 //  - رابط المشرفين والإدارة الموحّد: index.html?v=staff
@@ -160,9 +176,10 @@ function initApp() {
           return;
         }
         state.currentUser = stillValid;
-        navigateTo(state.currentView);
         updateNotificationsBadge();
-      } else {
+      }
+      // لا نُعيد رسم الشاشة إذا كان المستخدم في منتصف إدخال/نافذة مفتوحة حتى لا نفقد ما يكتبه
+      if (!isUserBusyEditing()) {
         navigateTo(state.currentView);
       }
     });
@@ -374,66 +391,83 @@ function navigateTo(viewName) {
   const contentArea = document.getElementById("app-content");
   if (!contentArea || !window.views) return;
 
-  switch (viewName) {
-    case "portal":
-      contentArea.innerHTML = window.views.renderPortalView();
-      break;
-    case "home":
+  // أي شاشة داخلية تتطلب تسجيل دخول: بدون مستخدم نعود للبوابة (يمنع أخطاء العرض)
+  if (!state.currentUser && viewName !== "portal") {
+    state.currentView = "portal";
+    contentArea.innerHTML = window.views.renderPortalView();
+    return;
+  }
+
+  try {
+    switch (viewName) {
+      case "portal":
+        contentArea.innerHTML = window.views.renderPortalView();
+        break;
+      case "home":
+        contentArea.innerHTML = window.views.renderHome(state.currentUser);
+        break;
+      case "quick-attendance":
+        contentArea.innerHTML = window.views.renderQuickAttendanceView
+          ? window.views.renderQuickAttendanceView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "schedule":
+        contentArea.innerHTML = window.views.renderScheduleWidget(
+          state.currentProgramId,
+          state.currentWeekOffset,
+          state.scheduleViewMode,
+        );
+        break;
+      case "tasks":
+        contentArea.innerHTML = window.views.renderTasksView(state.currentUser);
+        break;
+      case "attendance":
+        contentArea.innerHTML = window.views.renderAttendanceManagementView
+          ? window.views.renderAttendanceManagementView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "students":
+        contentArea.innerHTML = window.views.renderAdminStudentsView
+          ? window.views.renderAdminStudentsView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "supervisors":
+        contentArea.innerHTML = window.views.renderAdminSupervisorsView
+          ? window.views.renderAdminSupervisorsView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "announcements":
+        contentArea.innerHTML = window.views.renderAnnouncementsView
+          ? window.views.renderAnnouncementsView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "settings":
+        contentArea.innerHTML = window.views.renderSettingsView
+          ? window.views.renderSettingsView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "day-review":
+        contentArea.innerHTML =
+          window.views.renderDayReviewView && state.currentUser.role === "admin"
+            ? window.views.renderDayReviewView()
+            : window.views.renderHome(state.currentUser);
+        break;
+      default:
+        contentArea.innerHTML = state.currentUser
+          ? window.views.renderHome(state.currentUser)
+          : window.views.renderPortalView();
+        break;
+    }
+  } catch (e) {
+    console.error("خطأ في عرض الشاشة (" + viewName + "):", e);
+    // fallback آمن حتى لا تبقى الشاشة فارغة
+    try {
       contentArea.innerHTML = state.currentUser
         ? window.views.renderHome(state.currentUser)
         : window.views.renderPortalView();
-      break;
-    case "quick-attendance":
-      contentArea.innerHTML = window.views.renderQuickAttendanceView
-        ? window.views.renderQuickAttendanceView()
-        : window.views.renderHome(state.currentUser);
-      break;
-    case "schedule":
-      contentArea.innerHTML = window.views.renderScheduleWidget(
-        state.currentProgramId,
-        state.currentWeekOffset,
-        state.scheduleViewMode,
-      );
-      break;
-    case "tasks":
-      contentArea.innerHTML = window.views.renderTasksView(state.currentUser);
-      break;
-    case "attendance":
-      contentArea.innerHTML = window.views.renderAttendanceManagementView
-        ? window.views.renderAttendanceManagementView()
-        : window.views.renderHome(state.currentUser);
-      break;
-    case "students":
-      contentArea.innerHTML = window.views.renderAdminStudentsView
-        ? window.views.renderAdminStudentsView()
-        : window.views.renderHome(state.currentUser);
-      break;
-    case "supervisors":
-      contentArea.innerHTML = window.views.renderAdminSupervisorsView
-        ? window.views.renderAdminSupervisorsView()
-        : window.views.renderHome(state.currentUser);
-      break;
-    case "announcements":
-      contentArea.innerHTML = window.views.renderAnnouncementsView
-        ? window.views.renderAnnouncementsView()
-        : window.views.renderHome(state.currentUser);
-      break;
-    case "settings":
-      contentArea.innerHTML = window.views.renderSettingsView
-        ? window.views.renderSettingsView()
-        : window.views.renderHome(state.currentUser);
-      break;
-    case "day-review":
-      contentArea.innerHTML =
-        window.views.renderDayReviewView &&
-        state.currentUser &&
-        state.currentUser.role === "admin"
-          ? window.views.renderDayReviewView()
-          : window.views.renderHome(state.currentUser);
-      break;
-    default:
+    } catch (e2) {
       contentArea.innerHTML = window.views.renderPortalView();
-      break;
+    }
   }
 }
 
@@ -605,8 +639,9 @@ function bulkRecordAttendance(scheduleId, status, date) {
   }
 
   selectedBoxes.forEach((cb) => {
-    recordAttendance(scheduleId, cb.value, status, d);
+    recordAttendance(scheduleId, cb.value, status, d, true);
   });
+  persist("attendanceRecords");
 
   alert(`تم رصد حالة (${status}) لعدد (${selectedBoxes.length}) طالب.`);
   views.updateAttendanceModalView(scheduleId);
@@ -629,10 +664,11 @@ function markRemainingAbsent(scheduleId, date) {
   students.forEach((st) => {
     const currentStatus = getStudentAttendanceStatus(scheduleId, st.id, d);
     if (currentStatus === "غير محدد") {
-      recordAttendance(scheduleId, st.id, "غائب", d);
+      recordAttendance(scheduleId, st.id, "غائب", d, true);
       markedCount++;
     }
   });
+  if (markedCount > 0) persist("attendanceRecords");
 
   alert(`تم احتساب (${markedCount}) طالب كـ (غائب).`);
   if (window.views && window.views.updateAttendanceModalView) {
@@ -1118,9 +1154,16 @@ function updateSupervisorData(supervisorId, data) {
     sup.assignedPrograms = data.assignedPrograms.filter((p) => isProgramActive(p));
   if (data.password) sup.password = data.password;
 
+  // إن كان المستخدم يعدّل بيانات نفسه، حدّث الجلسة والترويسة
+  if (state.currentUser && state.currentUser.id === sup.id) {
+    state.currentUser = sup;
+    const hdr = document.getElementById("header-user-name");
+    if (hdr) hdr.innerText = sup.name;
+  }
+
   persist("users");
   closeModal("edit-supervisor-modal");
-  alert(`تم تحديث بيانات المشرف (${sup.name}) بنجاح.`);
+  alert(`تم تحديث بيانات (${sup.name}) بنجاح.`);
   navigateTo("supervisors");
 }
 
@@ -1283,7 +1326,7 @@ function updateProfile() {
 }
 
 // 18. نظام التحضير الذكي (كل سجل مرتبط بتاريخ محدد)
-function recordAttendance(scheduleId, studentId, status, date) {
+function recordAttendance(scheduleId, studentId, status, date, skipPersist) {
   if (!db.attendanceRecords) db.attendanceRecords = [];
   const d = date || attendanceContextDate();
 
@@ -1317,7 +1360,7 @@ function recordAttendance(scheduleId, studentId, status, date) {
     });
   }
 
-  persist("attendanceRecords");
+  if (!skipPersist) persist("attendanceRecords");
 
   if (window.views && window.views.updateAttendanceModalView) {
     window.views.updateAttendanceModalView(scheduleId);
@@ -1552,16 +1595,21 @@ function toggleNotificationsModal() {
   }
 }
 
+// هل هذا الإشعار موجّه للمستخدم الحالي؟
+function notifTargetsCurrentUser(n) {
+  if (!state.currentUser) return false;
+  if (n.userId === "all") return true;
+  if (n.userId === state.currentUser.id) return true;
+  // الإشعارات الموجّهة لدور "admin" تصل لكل الإداريين
+  if (state.currentRole === "admin" && n.userId === "admin") return true;
+  return false;
+}
+
 function renderNotificationsList() {
   const container = document.getElementById("notifications-list");
   if (!container) return;
 
-  const notifs = db.notifications.filter(
-    (n) =>
-      n.userId === state.currentUser.id ||
-      n.userId === "all" ||
-      state.currentRole === "admin",
-  );
+  const notifs = db.notifications.filter(notifTargetsCurrentUser);
 
   if (notifs.length === 0) {
     container.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs font-medium">لا توجد إشعارات حالية</div>`;
@@ -1588,13 +1636,7 @@ function renderNotificationsList() {
 
 function markAllNotificationsRead() {
   db.notifications.forEach((n) => {
-    if (
-      n.userId === state.currentUser.id ||
-      n.userId === "all" ||
-      state.currentRole === "admin"
-    ) {
-      n.isRead = true;
-    }
+    if (notifTargetsCurrentUser(n)) n.isRead = true;
   });
   persist("notifications");
   updateNotificationsBadge();
@@ -1605,11 +1647,7 @@ function updateNotificationsBadge() {
   const badge = document.getElementById("notif-badge");
   if (!badge || !state.currentUser) return;
   const unread = db.notifications.filter(
-    (n) =>
-      (n.userId === state.currentUser.id ||
-        n.userId === "all" ||
-        state.currentRole === "admin") &&
-      !n.isRead,
+    (n) => notifTargetsCurrentUser(n) && !n.isRead,
   ).length;
   if (unread > 0) {
     badge.innerText = unread;
