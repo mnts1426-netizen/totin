@@ -329,6 +329,7 @@ window.views = {
 
   // 4. الواجهة الرئيسية مع شريط تثبيت التطبيق وتفعيل الإشعارات
   renderHome(user) {
+    if (!user) return this.renderPortalView();
     const installBannerHtml = `
             <div id="pwa-install-banner" class="bg-gradient-to-r from-[#0B2533] via-[#163a75] to-[#0B2533] rounded-2xl p-4 text-white shadow-md border-r-4 border-r-[#D4A359] flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                 <div class="flex items-center space-x-3 space-x-reverse">
@@ -2228,6 +2229,7 @@ window.views = {
 
   // 17. مودال التحضير بالجداول التقليدي
   openAttendanceModal(scheduleId) {
+    closeModal("attendance-modal");
     const schedule = db.schedules.find((s) => s.id === scheduleId);
     if (!schedule) return;
 
@@ -2240,6 +2242,11 @@ window.views = {
       return;
     }
 
+    const attDate =
+      typeof attendanceContextDate === "function"
+        ? attendanceContextDate()
+        : new Date().toISOString().split("T")[0];
+    const isPastDate = attDate < (typeof todayStr === "function" ? todayStr() : "");
     const program = db.programs.find((p) => p.id === schedule.programId) || {};
     const students = db.users.filter(
       (u) =>
@@ -2262,6 +2269,9 @@ window.views = {
                                 برنامج ${program.name || "البرنامج"}
                             </span>
                             <h3 class="font-bold text-sm sm:text-base leading-snug">${schedule.title}</h3>
+                            <div class="text-[10px] mt-0.5 ${isPastDate ? "text-amber-300 font-bold" : "text-slate-300"}">
+                                تاريخ التحضير: ${attDate}${isPastDate ? " (يوم سابق)" : " (اليوم)"}
+                            </div>
                         </div>
                         <button onclick="closeModal('attendance-modal')" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
                     </div>
@@ -2469,8 +2479,20 @@ window.views = {
               ? "text-sky-700"
               : "text-slate-500";
 
-    const attendanceBlock = daySchedules
-      .filter((s) => s.requiresAttendance)
+    // الجلسات التي نعرض تحضيرها: جلسات هذا اليوم من الجدول + أي جلسة سُجّل فيها تحضير في هذا التاريخ
+    const schedIdsWithRecords = [
+      ...new Set(dayAttendance.map((r) => r.scheduleId)),
+    ];
+    const attSchedIds = [
+      ...new Set([
+        ...daySchedules.filter((s) => s.requiresAttendance).map((s) => s.id),
+        ...schedIdsWithRecords,
+      ]),
+    ];
+
+    const attendanceBlock = attSchedIds
+      .map((sid) => (db.schedules || []).find((s) => s.id === sid))
+      .filter(Boolean)
       .map((sch) => {
         const students = db.users.filter(
           (u) => u.role === "student" && u.currentProgramId === sch.programId,
