@@ -97,10 +97,166 @@ function makeId(prefix) {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 }
 
+// ===== الحماية من حقن الأكواد (XSS) =====
+
+// تنظيف نص قادم من المستخدم قبل حفظه: إزالة رموز HTML الخطرة والتحكم، وتقييد الطول
+function cleanText(v, maxLen) {
+  if (v === undefined || v === null) return "";
+  let s = String(v)
+    .replace(/[<>"'`]/g, "")
+    .replace(/javascript:/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (maxLen && s.length > maxLen) s = s.slice(0, maxLen);
+  return s;
+}
+
+// ترميز نص عند عرضه داخل innerHTML (دفاع إضافي)
+function escHtml(v) {
+  if (v === undefined || v === null) return "";
+  return String(v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+window.escHtml = escHtml;
+window.cleanText = cleanText;
+
 function persist(...collections) {
   if (window.store && typeof window.store.save === "function") {
     window.store.save(...collections);
   }
+}
+
+// ===== الإعدادات والفصل الدراسي =====
+function getAppSettings() {
+  if (!Array.isArray(window.db.appSettings)) window.db.appSettings = [];
+  let app = window.db.appSettings.find((s) => s && s.id === "app");
+  if (!app) {
+    const seed =
+      (window.__DB_SEED__ &&
+        window.__DB_SEED__.appSettings &&
+        window.__DB_SEED__.appSettings[0]) ||
+      { id: "app" };
+    app = JSON.parse(JSON.stringify(seed));
+    window.db.appSettings.unshift(app);
+  }
+  return app;
+}
+
+// تاريخ بداية الفصل الحالي (لتصفية الإحصاءات على الفصل الجاري)
+function termStartDate() {
+  const app = getAppSettings();
+  return (app.currentTerm && app.currentTerm.startDate) || "2000-01-01";
+}
+
+// ===== واتساب =====
+// تحويل رقم سعودي 05xxxxxxxx إلى صيغة دولية 9665xxxxxxxx
+function toWaNumber(phone) {
+  let p = normalizeDigits(phone).replace(/[^\d]/g, "");
+  if (!p) return "";
+  if (p.startsWith("00")) p = p.slice(2);
+  if (p.startsWith("966")) return p;
+  if (p.startsWith("0")) p = p.slice(1);
+  if (p.length === 9 && p.startsWith("5")) return "966" + p;
+  if (p.length === 10 && p.startsWith("05")) return "966" + p.slice(1);
+  return p; // رقم دولي كامل مُدخل يدوياً
+}
+
+function waLink(phone, text) {
+  const num = toWaNumber(phone);
+  const body = encodeURIComponent(String(text || ""));
+  return num ? `https://wa.me/${num}?text=${body}` : "";
+}
+
+function fillTemplate(tpl, map) {
+  return String(tpl || "").replace(/\{(\w+)\}/g, (m, k) =>
+    map[k] !== undefined && map[k] !== null ? String(map[k]) : "",
+  );
+}
+
+// ===== سجل العمليات (Audit log) =====
+function logAudit(action, details) {
+  if (!Array.isArray(window.db.auditLog)) window.db.auditLog = [];
+  const u = state.currentUser;
+  window.db.auditLog.unshift({
+    id: makeId("log"),
+    ts: Date.now(),
+    date: new Date().toLocaleString("ar-SA"),
+    userId: u ? u.id : "system",
+    userName: cleanText(u ? u.name : "النظام", 60),
+    role: u ? u.role : "system",
+    action: cleanText(action, 80),
+    details: cleanText(details, 300),
+  });
+  // إبقاء آخر 600 عملية فقط لتفادي التضخم
+  if (window.db.auditLog.length > 600) {
+    window.db.auditLog = window.db.auditLog.slice(0, 600);
+  }
+  persist("auditLog");
+}
+
+// ===== إحصاءات الحضور الحقيقية =====
+// حساب إحصاء حضور طالب واحد ضمن نطاق تاريخي
+function studentAttendanceStats(studentId, fromISO, toISO) {
+  const from = fromISO || termStartDate();
+  const to = toISO || todayStr();
+  const recs = (window.db.attendanceRecords || []).filter(
+    (r) =>
+      r.studentId === studentId &&
+      (r.date || "") >= from &&
+      (r.date || "") <= to,
+  );
+  const s = { present: 0, absent: 0, late: 0, excused: 0, total: recs.length };
+  recs.forEach((r) => {
+    if (r.status === "حاضر") s.present++;
+    else if (r.status === "غائب") s.absent++;
+    else if (r.status === "متأخر") s.late++;
+    else if (r.status === "مستأذن") s.excused++;
+  });
+  // نسبة الانضباط: (حاضر + نصف وزن للتأخر) / (الكل عدا المستأذن)
+  const denom = s.present + s.absent + s.late;
+  s.rate = denom > 0 ? Math.round(((s.present + s.late * 0.5) / denom) * 100) : 100;
+  return s;
+}
+
+// نسبة الانضباط العامة (لكل البرامج المفعّلة أو برنامج محدد) خلال الفصل الحالي
+function overallDisciplineRate(programId) {
+  const from = termStartDate();
+  const activeIds = getActivePrograms().map((p) => p.id);
+  const recs = (window.db.attendanceRecords || []).filter((r) => {
+    if ((r.date || "") < from) return false;
+    if (programId) return r.programId === programId;
+    return !r.programId || activeIds.includes(r.programId);
+  });
+  let present = 0,
+    late = 0,
+    denom = 0;
+  recs.forEach((r) => {
+    if (r.status === "حاضر") {
+      present++;
+      denom++;
+    } else if (r.status === "متأخر") {
+      late++;
+      denom++;
+    } else if (r.status === "غائب") denom++;
+  });
+  return denom > 0
+    ? Math.round(((present + late * 0.5) / denom) * 100)
+    : null;
+}
+
+// هل للطالب عذر معتمد في هذا التاريخ؟
+function hasApprovedExcuse(studentId, dateISO) {
+  return (window.db.excuseRequests || []).some(
+    (e) =>
+      e.studentId === studentId &&
+      e.status === "معتمد" &&
+      dateISO >= (e.fromDate || "") &&
+      dateISO <= (e.toDate || e.fromDate || ""),
+  );
 }
 
 // هل المستخدم في منتصف كتابة داخل نموذج أو نافذة مفتوحة؟ (لتفادي مسح إدخاله عند وصول تحديث سحابي)
@@ -492,7 +648,8 @@ function handleStudentExcelImport(event) {
       const parts = line.split(",").map((p) => p.trim());
       if (parts.length < 2 || !parts[0]) return;
 
-      const name = parts[0];
+      const name = cleanText(parts[0], 80);
+      if (!name) return;
       const phone = normalizeDigits(parts[1]);
       const nationalId = normalizeDigits(parts[2] || "");
       const fatherPhone = normalizeDigits(parts[3] || parts[1]);
@@ -561,7 +718,8 @@ function handleSupervisorExcelImport(event) {
       const parts = line.split(",").map((p) => p.trim());
       if (parts.length < 2 || !parts[0]) return;
 
-      const name = parts[0];
+      const name = cleanText(parts[0], 80);
+      if (!name) return;
       const phone = normalizeDigits(parts[1]);
       const nationalId = normalizeDigits(parts[2] || "");
 
@@ -948,9 +1106,10 @@ function acceptStudentRequest(reqId) {
     return;
   }
 
+  const cleanName = cleanText(req.name, 80) || "طالب";
   const newStudent = {
     id: makeId("student"),
-    name: req.name,
+    name: cleanName,
     role: "student",
     studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
     phone: normalizeDigits(req.phone),
@@ -958,7 +1117,7 @@ function acceptStudentRequest(reqId) {
     fatherPhone: normalizeDigits(req.fatherPhone || req.phone),
     password: "1234",
     email: `${normalizeDigits(req.phone)}@totin.sa`,
-    avatar: req.name.substring(0, 2),
+    avatar: cleanName.substring(0, 2),
     currentProgramId: progId,
     currentLevelId: getDefaultLevelId(progId),
     groupId: getDefaultGroupId(progId),
@@ -1007,9 +1166,10 @@ function addNewStudent(data) {
     ? data.currentProgramId
     : firstActiveProgramId();
 
+  const cleanName = cleanText(data.name, 80) || "طالب";
   const newStudent = {
     id: makeId("student"),
-    name: data.name,
+    name: cleanName,
     role: "student",
     studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
     phone: phone,
@@ -1017,7 +1177,7 @@ function addNewStudent(data) {
     fatherPhone: normalizeDigits(data.fatherPhone || ""),
     password: "1234",
     email: `${phone}@totin.sa`,
-    avatar: (data.name || "طا").substring(0, 2),
+    avatar: cleanName.substring(0, 2),
     currentProgramId: progId,
     currentLevelId: getDefaultLevelId(progId),
     groupId: getDefaultGroupId(progId),
@@ -1050,13 +1210,14 @@ function updateStudentData(studentId, data) {
     return;
   }
 
-  student.name = data.name;
+  student.name = cleanText(data.name, 80) || student.name;
+  student.avatar = student.name.substring(0, 2);
   student.phone = phone;
   if (data.nationalId !== undefined) student.nationalId = nationalId;
   student.fatherPhone = normalizeDigits(data.fatherPhone || "");
   if (isProgramActive(data.currentProgramId))
     student.currentProgramId = data.currentProgramId;
-  if (data.password) student.password = data.password;
+  if (data.password) student.password = cleanText(data.password, 60);
 
   persist("users");
   closeModal("edit-student-modal");
@@ -1107,15 +1268,16 @@ function addNewSupervisor(data) {
     isProgramActive(p),
   );
 
+  const cleanName = cleanText(data.name, 80) || "مشرف";
   const newSupervisor = {
     id: makeId("supervisor"),
-    name: data.name,
+    name: cleanName,
     role: "supervisor",
     phone: phone,
     nationalId: nationalId,
     password: "1234",
     email: `${phone}@totin.sa`,
-    avatar: (data.name || "مش").substring(0, 2),
+    avatar: cleanName.substring(0, 2),
     color: assignedColor,
     assignedPrograms: assignedPrograms.length
       ? assignedPrograms
@@ -1147,12 +1309,13 @@ function updateSupervisorData(supervisorId, data) {
     return;
   }
 
-  sup.name = data.name;
+  sup.name = cleanText(data.name, 80) || sup.name;
+  sup.avatar = sup.name.substring(0, 2);
   sup.phone = phone;
   if (data.nationalId !== undefined) sup.nationalId = nationalId;
   if (Array.isArray(data.assignedPrograms))
     sup.assignedPrograms = data.assignedPrograms.filter((p) => isProgramActive(p));
-  if (data.password) sup.password = data.password;
+  if (data.password) sup.password = cleanText(data.password, 60);
 
   // إن كان المستخدم يعدّل بيانات نفسه، حدّث الجلسة والترويسة
   if (state.currentUser && state.currentUser.id === sup.id) {
@@ -1201,15 +1364,16 @@ function addNewAdmin(data) {
     return;
   }
 
+  const cleanName = cleanText(data.name, 80) || "إداري";
   const newAdmin = {
     id: makeId("admin"),
-    name: data.name,
+    name: cleanName,
     role: "admin",
     phone: phone,
     nationalId: nationalId,
     password: "1234",
     email: `${phone}@totin.sa`,
-    avatar: (data.name || "مد").substring(0, 2),
+    avatar: cleanName.substring(0, 2),
     color: "#0B2533",
     isRestricted: false,
     createdAt: Date.now(),
@@ -1246,13 +1410,13 @@ function updateProfile() {
   const passEl = document.getElementById("set-user-pass");
   const idEl = document.getElementById("set-user-nid");
 
-  const name = nameEl ? nameEl.value.trim() : state.currentUser.name;
+  const name = nameEl ? cleanText(nameEl.value, 80) : state.currentUser.name;
   const phone = phoneEl ? normalizeDigits(phoneEl.value) : state.currentUser.phone;
-  const email = emailEl ? emailEl.value.trim() : state.currentUser.email;
+  const email = emailEl ? cleanText(emailEl.value, 120) : state.currentUser.email;
   const nationalId = idEl
     ? normalizeDigits(idEl.value)
     : state.currentUser.nationalId;
-  const newPass = passEl ? passEl.value.trim() : "";
+  const newPass = passEl ? cleanText(passEl.value, 60) : "";
 
   const me = state.currentUser;
 
@@ -1268,13 +1432,16 @@ function updateProfile() {
 
   if (me.role === "admin") {
     // الإداري يعدّل مباشرة
-    me.name = name;
+    if (name) {
+      me.name = name;
+      me.avatar = name.substring(0, 2);
+    }
     me.phone = phone;
     me.email = email;
     if (nationalId) me.nationalId = nationalId;
     if (newPass) me.password = newPass;
     const hdr = document.getElementById("header-user-name");
-    if (hdr) hdr.innerText = name;
+    if (hdr) hdr.innerText = me.name;
     persist("users");
     alert("تم حفظ البيانات بنجاح.");
     navigateTo("settings");
@@ -1444,9 +1611,14 @@ function addNewTask(taskData) {
     return;
   }
 
+  const cleanTitle = cleanText(taskData.title, 200);
+  if (!cleanTitle) {
+    alert("عنوان المهمة مطلوب.");
+    return;
+  }
   const newTask = {
     id: makeId("tsk"),
-    title: taskData.title,
+    title: cleanTitle,
     programId: taskData.programId,
     dayOfWeek: parseInt(taskData.dayOfWeek),
     date: taskData.date || todayStr(),
@@ -1464,7 +1636,7 @@ function addNewTask(taskData) {
     isExempt: false,
     exemptionReason: null,
     createdBy: state.currentUser.id,
-    description: taskData.description || "",
+    description: cleanText(taskData.description, 500),
     createdAt: Date.now(),
   };
 
@@ -1509,13 +1681,17 @@ function sendTargetedNotification(data) {
     targetUserIds = ["admin"];
   }
 
+  const nTitle = cleanText(data.title, 150) || "إشعار";
+  const nMsg = cleanText(data.message, 1000);
+  const senderName = cleanText(sender.name, 80);
+
   targetUserIds.forEach((uid) => {
     db.notifications.unshift({
       id: `notif_${Date.now()}_${uid}`,
       userId: uid,
       category: sender.role === "admin" ? "إشعار إداري" : "رسالة واردة",
-      title: data.title,
-      message: `من (${sender.name}): ${data.message}`,
+      title: nTitle,
+      message: `من (${senderName}): ${nMsg}`,
       date: "الآن",
       isRead: false,
     });
@@ -1530,16 +1706,22 @@ function sendTargetedNotification(data) {
 // إضافة إعلان جديد للوحة الإعلانات
 function addNewAnnouncement(data) {
   if (!db.announcements) db.announcements = [];
+  const aTitle = cleanText(data.title, 150);
+  const aContent = cleanText(data.content, 2000);
+  if (!aTitle || !aContent) {
+    alert("العنوان والنص مطلوبان.");
+    return;
+  }
   db.announcements.unshift({
     id: makeId("anc"),
-    title: data.title,
-    content: data.content,
-    publisher: state.currentUser ? state.currentUser.name : "الإدارة",
+    title: aTitle,
+    content: aContent,
+    publisher: cleanText(state.currentUser ? state.currentUser.name : "الإدارة", 80),
     targetGroup: data.targetGroup || "all",
-    mediaType: data.mediaType || "none",
-    mediaUrl: data.mediaUrl || "",
+    mediaType: "none",
+    mediaUrl: "",
     date: todayStr(),
-    priority: data.priority || "عادي",
+    priority: data.priority === "عاجل" ? "عاجل" : "عادي",
   });
   persist("announcements");
   closeModal("add-announcement-modal");
@@ -1624,9 +1806,9 @@ function renderNotificationsList() {
                 <i class="fa-solid fa-bell text-xs"></i>
             </div>
             <div class="flex-1">
-                <div class="text-xs font-bold text-slate-800">${n.title}</div>
-                <div class="text-[11px] text-slate-500 mt-0.5">${n.message}</div>
-                <div class="text-[9px] text-slate-400 mt-0.5">${n.date}</div>
+                <div class="text-xs font-bold text-slate-800">${escHtml(n.title)}</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">${escHtml(n.message)}</div>
+                <div class="text-[9px] text-slate-400 mt-0.5">${escHtml(n.date)}</div>
             </div>
         </div>
     `,
@@ -1660,4 +1842,7 @@ function updateNotificationsBadge() {
 function closeModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) modal.remove();
+  if (modalId === "student-cards-modal" || modalId === "single-card-modal") {
+    document.body.classList.remove("printing-cards");
+  }
 }
