@@ -106,10 +106,13 @@ window.store = (function () {
           pushAll();
           return;
         }
+        const firstTime = !firstSnapshotHandled;
         firstSnapshotHandled = true;
         applyingRemote = true;
+        const present = {};
         qs.forEach((doc) => {
           const name = doc.id;
+          present[name] = true;
           const data = doc.data() || {};
           if (DYNAMIC.includes(name) && Array.isArray(data.items)) {
             window.db[name] = data.items;
@@ -122,6 +125,12 @@ window.store = (function () {
         saveLocal();
         if (addedAdmin) pushCollection("users");
         if (fixedSettings) pushCollection("appSettings");
+        // أول مزامنة: ارفع أي مجموعة جديدة غير موجودة في السحابة بعد (ترقية آمنة)
+        if (firstTime) {
+          DYNAMIC.forEach((n) => {
+            if (!present[n]) pushCollection(n);
+          });
+        }
         notify();
       },
       (err) => {
