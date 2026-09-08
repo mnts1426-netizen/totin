@@ -1541,35 +1541,71 @@ window.views = {
 
   // 12. نافذة طباعة بطاقات الطلاب الأكاديمية المصغرة (ID Badges with Barcode)
   openStudentCardsModal() {
-    const students = db.users.filter(
+    closeModal("student-cards-modal");
+    document.body.classList.remove("printing-cards");
+
+    const perPage = this._cardsPerPage || 9; // الافتراضي 9 بطاقات في الصفحة
+    const progFilter = this._cardsProg || "all";
+    this._cardsPerPage = perPage;
+    this._cardsProg = progFilter;
+
+    const activePrograms = getActivePrograms();
+    let students = db.users.filter(
       (u) => u.role === "student" && !u.isRestricted,
     );
+    if (progFilter !== "all") {
+      students = students.filter((u) => u.currentProgramId === progFilter);
+    }
+    students.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+
+    const colsFor = { 2: 2, 4: 2, 9: 3, 12: 3 };
+    const cols = colsFor[perPage] || 3;
+    const compact = perPage >= 9;
 
     const modalHtml = `
-            <div id="student-cards-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex justify-center items-start pt-10 px-4 overflow-y-auto">
-                <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-4xl w-full overflow-hidden my-6">
-                    
-                    <div class="bg-[#0B2533] text-white p-5 flex justify-between items-center border-b border-[#D4A359] print-hide">
+            <div id="student-cards-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex justify-center items-start pt-8 px-4 overflow-y-auto">
+                <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-5xl w-full overflow-hidden my-6">
+
+                    <div class="bg-[#0B2533] text-white p-4 sm:p-5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-[#D4A359] print-hide">
                         <div>
-                            <h3 class="font-black text-base sm:text-lg flex items-center">
-                                <i class="fa-solid fa-id-card text-[#D4A359] ml-2"></i> بطاقات هوية الطلاب للطباعة المباشرة (مع الباركود)
+                            <h3 class="font-black text-sm sm:text-lg flex items-center">
+                                <i class="fa-solid fa-id-card text-[#D4A359] ml-2"></i> طباعة بطاقات الطلاب (باركود حقيقي)
                             </h3>
-                            <p class="text-xs text-slate-300 mt-0.5">بطاقات مصغرة قياسية يمكن مسحها ضوئياً عبر أجهزة الـ USB عند التحضير</p>
+                            <p class="text-[11px] text-slate-300 mt-0.5">${students.length} طالب — تُطبع ${perPage} بطاقة في كل ورقة A4</p>
                         </div>
-                        <div class="flex items-center space-x-2 space-x-reverse">
-                            <button onclick="window.print()" class="px-4 py-2 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-xl text-xs transition shadow-sm flex items-center">
-                                <i class="fa-solid fa-print ml-1.5 text-sm"></i> طباعة البطاقات الآن
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <select onchange="views._cardsProg=this.value; views.openStudentCardsModal();" class="bg-white/10 border border-white/20 text-white text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none">
+                                <option value="all" ${progFilter === "all" ? "selected" : ""}>كل البرامج المفعّلة</option>
+                                ${activePrograms
+                                  .map(
+                                    (p) =>
+                                      `<option value="${p.id}" ${progFilter === p.id ? "selected" : ""}>${escHtml(p.name)}</option>`,
+                                  )
+                                  .join("")}
+                            </select>
+                            <select onchange="views._cardsPerPage=parseInt(this.value); views.openStudentCardsModal();" class="bg-white/10 border border-white/20 text-white text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none">
+                                <option value="9" ${perPage === 9 ? "selected" : ""}>9 في الورقة</option>
+                                <option value="12" ${perPage === 12 ? "selected" : ""}>12 في الورقة</option>
+                                <option value="4" ${perPage === 4 ? "selected" : ""}>4 في الورقة</option>
+                                <option value="2" ${perPage === 2 ? "selected" : ""}>2 في الورقة</option>
+                            </select>
+                            <button onclick="views.printCards()" class="px-3.5 py-1.5 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-lg text-xs transition shadow-sm flex items-center">
+                                <i class="fa-solid fa-print ml-1.5"></i> طباعة الآن
                             </button>
-                            <button onclick="closeModal('student-cards-modal')" class="text-slate-300 hover:text-white text-xl mr-2">
+                            <button onclick="closeModal('student-cards-modal')" class="text-slate-300 hover:text-white text-lg mr-1">
                                 <i class="fa-solid fa-xmark"></i>
                             </button>
                         </div>
                     </div>
 
-                    <div class="p-6 bg-slate-100 max-h-[75vh] overflow-y-auto" id="printable-cards-container">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 student-cards-print-grid">
-                            ${students.map((st) => views.buildStudentBadgeHtml(st)).join("")}
-                        </div>
+                    <div class="p-4 sm:p-6 bg-slate-100 max-h-[72vh] overflow-y-auto print-hide-scroll">
+                        ${
+                          students.length === 0
+                            ? '<div class="text-center py-10 text-slate-400 text-sm">لا يوجد طلاب مطابقون</div>'
+                            : `<div id="print-area" class="cards-grid cards-cols-${cols}">
+                                ${students.map((st) => views.buildStudentBadgeHtml(st, compact)).join("")}
+                               </div>`
+                        }
                     </div>
 
                 </div>
@@ -1577,10 +1613,21 @@ window.views = {
         `;
 
     document.body.insertAdjacentHTML("beforeend", modalHtml);
+    setTimeout(() => views.renderBadgeBarcodes(document.getElementById("print-area")), 30);
+  },
+
+  // تشغيل الطباعة مع تجهيز الصفحة (إخفاء كل شيء عدا البطاقات)
+  printCards() {
+    document.body.classList.add("printing-cards");
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => document.body.classList.remove("printing-cards"), 400);
+    }, 60);
   },
 
   // طباعة بطاقة لطالب واحد منفرد
   openSingleStudentCardPrint(studentId) {
+    closeModal("single-card-modal");
     const student = db.users.find((u) => u.id === studentId);
     if (!student) return;
 
@@ -1592,12 +1639,12 @@ window.views = {
                         <button onclick="closeModal('single-card-modal')" class="text-slate-400 hover:text-slate-700"><i class="fa-solid fa-xmark text-lg"></i></button>
                     </div>
 
-                    <div id="printable-cards-container" class="flex justify-center">
-                        ${views.buildStudentBadgeHtml(student)}
+                    <div id="print-area" class="cards-grid cards-cols-1 flex justify-center">
+                        ${views.buildStudentBadgeHtml(student, false)}
                     </div>
 
                     <div class="flex justify-center space-x-2 space-x-reverse pt-2 print-hide">
-                        <button onclick="window.print()" class="px-5 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-black rounded-xl text-xs transition">
+                        <button onclick="views.printCards()" class="px-5 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-black rounded-xl text-xs transition">
                             <i class="fa-solid fa-print ml-1.5"></i> طباعة البطاقة
                         </button>
                         <button onclick="closeModal('single-card-modal')" class="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs">
@@ -1609,62 +1656,67 @@ window.views = {
         `;
 
     document.body.insertAdjacentHTML("beforeend", modalHtml);
+    setTimeout(() => views.renderBadgeBarcodes(document.getElementById("print-area")), 30);
   },
 
   // بناء قالب البطاقة المصغرة الفاخرة مع الباركود
-  buildStudentBadgeHtml(student) {
+  buildStudentBadgeHtml(student, compact) {
     const program =
       db.programs.find((p) => p.id === student.currentProgramId) || {};
+    const code = String(student.studentNumber || student.id || "");
+    const esc = (v) => (typeof escHtml === "function" ? escHtml(v) : v);
     return `
-            <div class="student-id-badge bg-white rounded-2xl border-2 border-[#D4A359] p-3.5 shadow-sm text-right flex flex-col justify-between relative overflow-hidden" style="width: 100%; max-width: 330px; height: 195px; margin: 0 auto;">
-                
-                <!-- الشريط التذهيبي العلوي والشعارات -->
-                <div class="flex justify-between items-center border-b border-slate-100 pb-2">
-                    <div class="flex items-center space-x-1.5 space-x-reverse">
-                        <img src="logo15.png" alt="مشكاة" class="h-6 w-auto object-contain" onerror="this.style.display='none'">
-                        <div class="h-4 w-px bg-slate-200 mx-1"></div>
-                        <img src="logo16.png" alt="توطين" class="h-7 w-auto object-contain" onerror="this.style.display='none'">
+            <div class="student-id-badge ${compact ? "badge-compact" : ""} bg-white flex flex-col justify-between overflow-hidden">
+
+                <div class="badge-head">
+                    <div class="badge-logos">
+                        <img src="logo15.png" alt="مشكاة" onerror="this.style.display='none'">
+                        <img src="logo16.png" alt="توطين" onerror="this.style.display='none'">
                     </div>
-                    <span class="text-[9px] font-black text-[#0B2533] bg-amber-50 border border-[#D4A359]/40 px-2 py-0.5 rounded-full">
-                        برنامج ${program.name || "العلمي"}
-                    </span>
+                    <span class="badge-prog">${esc(program.name || "علمي")}</span>
                 </div>
 
-                <!-- معلومات الطالب -->
-                <div class="flex items-center space-x-2.5 space-x-reverse py-1">
-                    <div class="w-10 h-10 rounded-xl bg-[#0B2533] text-[#D4A359] font-black flex items-center justify-center text-xs shrink-0 border border-[#D4A359]/40">
-                        ${student.avatar}
-                    </div>
-                    <div class="min-w-0 flex-1">
-                        <div class="text-xs font-black text-[#0B2533] truncate">${student.name}</div>
-                        <div class="text-[10px] font-bold text-slate-500 font-mono mt-0.5">الرقم: ${student.studentNumber}</div>
+                <div class="badge-body">
+                    <div class="badge-avatar">${esc(student.avatar || "")}</div>
+                    <div class="badge-info">
+                        <div class="badge-name">${esc(student.name)}</div>
+                        <div class="badge-num">${esc(code)}</div>
                     </div>
                 </div>
 
-                <!-- تمثيل الباركود الأكاديمي القابل للقراءة بأجهزة الـ USB -->
-                <div class="bg-slate-50 p-1.5 rounded-xl border border-slate-200 text-center flex flex-col items-center justify-center">
-                    <div class="barcode-lines flex items-center justify-center space-x-[2.5px] space-x-reverse h-7 w-full max-w-[200px] overflow-hidden">
-                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[1px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[3px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[1.5px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[4px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[1px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[2.5px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[1.5px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[3px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[1px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[3.5px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[1.5px] h-full inline-block"></span>
-                        <span class="bg-slate-900 w-[2px] h-full inline-block"></span>
-                    </div>
-                    <span class="text-[9px] font-black text-slate-700 font-mono tracking-wider mt-0.5">${student.studentNumber}</span>
+                <div class="badge-barcode-box">
+                    <svg class="badge-barcode" data-code="${esc(code)}"></svg>
                 </div>
 
             </div>
         `;
+  },
+
+  // رسم الباركود الحقيقي على كل بطاقة معروضة (يُستدعى بعد إدراج البطاقات)
+  renderBadgeBarcodes(root) {
+    const scope = root || document;
+    const safe = (c) => (typeof escHtml === "function" ? escHtml(c) : c);
+    scope.querySelectorAll("svg.badge-barcode[data-code]").forEach((svg) => {
+      const code = svg.getAttribute("data-code");
+      if (!code) return;
+      try {
+        if (typeof JsBarcode === "function") {
+          JsBarcode(svg, code, {
+            format: "CODE128",
+            displayValue: false,
+            margin: 0,
+            height: 34,
+            width: 1.4,
+          });
+        } else {
+          svg.outerHTML =
+            '<div class="badge-num" style="font-size:9px">' + safe(code) + "</div>";
+        }
+      } catch (e) {
+        svg.outerHTML =
+          '<div class="badge-num" style="font-size:9px">' + safe(code) + "</div>";
+      }
+    });
   },
 
   filterStudentsList(query) {
@@ -2657,6 +2709,9 @@ window.views = {
   renderSupervisorDashboard(supervisor) {
     const visibleTasks = getVisibleTasks(supervisor);
     const myTasks = visibleTasks.filter((t) => t.assignedTo === supervisor.id);
+    const supProgId =
+      (supervisor.assignedPrograms || []).find((p) => isProgramActive(p)) ||
+      firstActiveProgramId();
 
     return `
             <div class="space-y-4 sm:space-y-6">
@@ -2673,7 +2728,7 @@ window.views = {
                 <div class="bg-white p-4 sm:p-6 rounded-3xl border border-slate-200 shadow-sm border-t-2 border-t-[#D4A359]">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="text-sm sm:text-base font-bold text-[#0B2533]"><i class="fa-solid fa-list-check text-[#D4A359] ml-1.5"></i> مهامك المكلف بها</h3>
-                        <button onclick="views.openAddTaskModal('${supervisor.assignedPrograms[0]}')" class="text-xs text-[#0B2533] font-bold hover:text-[#D4A359]">
+                        <button onclick="views.openAddTaskModal('${supProgId}')" class="text-xs text-[#0B2533] font-bold hover:text-[#D4A359]">
                             + إضافة مهمة
                         </button>
                     </div>
@@ -2698,7 +2753,7 @@ window.views = {
                     </div>
                 </div>
 
-                ${this.renderScheduleWidget((supervisor.assignedPrograms || []).find((p) => isProgramActive(p)) || firstActiveProgramId())}
+                ${this.renderScheduleWidget(supProgId)}
             </div>
         `;
   },
