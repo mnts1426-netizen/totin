@@ -26,6 +26,10 @@ window.store = (function () {
     "pendingProfileEdits",
     "studentPrograms",
     "studentPaths",
+    "excuseRequests",
+    "auditLog",
+    "taskEvaluations",
+    "appSettings",
   ];
 
   let fs = null;
@@ -112,10 +116,12 @@ window.store = (function () {
           }
         });
         applyingRemote = false;
-        // تأكد من وجود حساب المدير دائماً
+        // تأكد من وجود حساب المدير وإعدادات التطبيق دائماً
         const addedAdmin = ensureAdmin();
+        const fixedSettings = ensureAppSettings();
         saveLocal();
         if (addedAdmin) pushCollection("users");
+        if (fixedSettings) pushCollection("appSettings");
         notify();
       },
       (err) => {
@@ -140,6 +146,42 @@ window.store = (function () {
     return false;
   }
 
+  // ضمان وجود وثيقة إعدادات التطبيق مع كل الحقول المطلوبة
+  function ensureAppSettings() {
+    const seed =
+      (window.__DB_SEED__ &&
+        window.__DB_SEED__.appSettings &&
+        window.__DB_SEED__.appSettings[0]) ||
+      {};
+    let changed = false;
+    if (!Array.isArray(window.db.appSettings)) {
+      window.db.appSettings = [];
+      changed = true;
+    }
+    let app = window.db.appSettings.find((s) => s && s.id === "app");
+    if (!app) {
+      app = JSON.parse(JSON.stringify(seed));
+      window.db.appSettings.unshift(app);
+      changed = true;
+    }
+    // دمج الحقول الناقصة من البذرة (لا يمسّ القيم الموجودة)
+    ["currentTerm", "terms", "waTemplates"].forEach((k) => {
+      if (app[k] === undefined && seed[k] !== undefined) {
+        app[k] = JSON.parse(JSON.stringify(seed[k]));
+        changed = true;
+      }
+    });
+    if (app.waTemplates && seed.waTemplates) {
+      Object.keys(seed.waTemplates).forEach((k) => {
+        if (app.waTemplates[k] === undefined) {
+          app.waTemplates[k] = seed.waTemplates[k];
+          changed = true;
+        }
+      });
+    }
+    return changed;
+  }
+
   return {
     // تهيئة الحفظ - تُستدعى مرة واحدة قبل أول رسم
     init(onChange) {
@@ -147,6 +189,7 @@ window.store = (function () {
       const local = loadLocal();
       if (local) applySnapshot(local);
       ensureAdmin();
+      ensureAppSettings();
       try {
         initFirestore();
       } catch (e) {
