@@ -22,6 +22,23 @@ try {
   if (typeof firebase !== "undefined" && !firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
     window.dbFirestore = firebase.firestore();
+
+    // تسجيل دخول مجهول (Anonymous Auth) - أساس لتأمين قواعد Firestore.
+    // الخطوات: 1) فعّل "Anonymous" في Firebase Console > Authentication
+    //          2) غيّر القيمة أدناه إلى true   3) انشر التطبيق   4) طبّق قواعد الأمان
+    window.USE_ANON_AUTH = false;
+    if (window.USE_ANON_AUTH && firebase.auth) {
+      window.__authReady = firebase
+        .auth()
+        .signInAnonymously()
+        .then(() => true)
+        .catch((e) => {
+          console.warn("تعذّر تسجيل الدخول المجهول:", e && e.code);
+          return false;
+        });
+    } else {
+      window.__authReady = Promise.resolve(false);
+    }
   }
 } catch (e) {
   console.warn("تعذر تهيئة Firebase:", e);
@@ -212,6 +229,32 @@ window.db = {
 
   // 14. التنبيهات والإشعارات
   notifications: [],
+
+  // 15. طلبات الاستئذان المسبق (الطالب يقدّم، المدير/المشرف يعتمد)
+  excuseRequests: [],
+
+  // 16. سجل العمليات (Audit log) - من فعل ماذا ومتى
+  auditLog: [],
+
+  // 17. تقييمات مهام الطلاب (rating + note لكل مهمة موجّهة لطالب)
+  taskEvaluations: [],
+
+  // 18. إعدادات التطبيق (وثيقة واحدة) - الفصل الدراسي الحالي، اسم الجهة، رسائل واتساب
+  appSettings: [
+    {
+      id: "app",
+      currentTerm: { id: "term_1", name: "الفصل الأول", startDate: "2026-01-01" },
+      terms: [
+        { id: "term_1", name: "الفصل الأول", startDate: "2026-01-01" },
+      ],
+      waTemplates: {
+        absence:
+          "السلام عليكم، نفيدكم بأن الطالب {student} تغيّب عن جلسة اليوم ({date}) في برنامج {program}. نرجو المتابعة.",
+        report:
+          "تقرير الطالب {student} — برنامج {program}\nالحضور: {present} | الغياب: {absent} | التأخر: {late} | نسبة الانضباط: {rate}%\n{note}",
+      },
+    },
+  ],
 };
 
 // نسخة من البذور الافتراضية للرجوع إليها عند الحاجة (لا تُعدّل)
