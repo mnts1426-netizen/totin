@@ -1,227 +1,519 @@
-/**
- * store.js - طبقة الحفظ والمزامنة للمنصة
- *
- *  - حفظ محلي دائم على الجهاز (localStorage) يعمل في كل الأحوال حتى بدون إنترنت.
- *  - مزامنة سحابية عبر Firebase Firestore عند توفر الاتصال، فتظهر أي إضافة
- *    (طالب / مشرف / تحضير / مهمة ...) على جميع الأجهزة فوراً، ويستطيع الطالب
- *    الدخول من جواله ويجد حسابه.
- *
- * لا يكسر التطبيق: إن فشل Firestore يبقى العمل على النسخة المحلية دون أي خلل.
- */
+/* ==========================================================================
+   1. المتغيرات اللونية والهوية البصرية الأكاديمية الفاخرة
+   ========================================================================== */
+:root {
+  --color-plum-dark: #2b1736; /* البنفسجي الداكن الملكي */
+  --color-navy: #0b2533; /* كحلي مشكاة الأساسي */
+  --color-teal: #169ba2; /* تركوازي توطين الأساسي */
+  --color-gold: #d4a359; /* ذهبي ورملي مشكاة التذهيبي */
+  --color-olive: #8aa838; /* أخضر زيتي توطين */
+  --color-amber: #e59824; /* كهرماني برتقالي */
+  --color-crimson: #9e1b48; /* عنابي وقفي */
+  --color-rose-bg: #fcecef; /* وردي فاتح ناعم */
+  --color-bg-main: #f4f6f9; /* خلفية رمادية هادئة مريحة للعين */
+  --color-card-bg: #ffffff; /* خلفية البطاقات الناصعة */
+  --color-border: #e2e8f0; /* حدود هادئة */
+  --shadow-luxury: 0 4px 15px rgba(11, 37, 51, 0.05); /* ظلال ناعمة راقية */
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
 
-window.store = (function () {
-  const LS_KEY = "totin_db_v2";
-  const FS_COLLECTION = "totin_state";
+* {
+  box-sizing: border-box;
+}
 
-  // المجموعات الديناميكية التي تُحفظ وتُزامَن (الثابتة مثل programs/levels/taskTemplates تبقى من data.js)
-  const DYNAMIC = [
-    "users",
-    "groups",
-    "schedules",
-    "tasks",
-    "attendanceRecords",
-    "announcements",
-    "notifications",
-    "registrationRequests",
-    "pendingProfileEdits",
-    "studentPrograms",
-    "studentPaths",
-    "excuseRequests",
-    "auditLog",
-    "taskEvaluations",
-    "appSettings",
-  ];
+body {
+  font-family: "Tajawal", sans-serif;
+  background-color: var(--color-bg-main);
+  color: #1e293b;
+  direction: rtl;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
 
-  let fs = null;
-  let onChangeCb = null;
-  let firstSnapshotHandled = false;
-  let applyingRemote = false;
+/* تخصيص شريط التمرير الرفيع */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-teal);
+}
 
-  function loadLocal() {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : null;
-    } catch (e) {
-      return null;
-    }
+/* ==========================================================================
+   2. بطاقات المؤشرات والبطاقات الفاخرة (Prestige KPI & Cards)
+   ========================================================================== */
+.kpi-card {
+  background: var(--color-card-bg);
+  border-radius: 1rem;
+  padding: 0.9rem 1.1rem;
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--color-gold); /* شريط التذهيب العلوي الفاخر */
+  box-shadow: var(--shadow-luxury);
+  transition: var(--transition);
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(11, 37, 51, 0.08);
+}
+
+.kpi-tag {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.65rem;
+  background: rgba(11, 37, 51, 0.04);
+  color: var(--color-gold);
+  font-size: 0.6rem;
+  font-weight: 900;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.35rem;
+  letter-spacing: 0.5px;
+}
+
+/* بطاقات المحتوى المؤطرة بالتذهيب */
+.content-card-luxury {
+  background: var(--color-card-bg);
+  border-radius: 1.25rem;
+  border: 1px solid var(--color-border);
+  border-top: 3.5px solid var(--color-gold);
+  box-shadow: var(--shadow-luxury);
+}
+
+/* ==========================================================================
+   3. شبكة الجدول الأسبوعي المصغرة والمتناسقة مع الجوال وسطح المكتب
+   ========================================================================== */
+.schedule-grid-container {
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(115px, 1fr));
+  gap: 0.45rem;
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .schedule-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+}
+
+.day-column {
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: var(--transition);
+}
+
+.day-column.today {
+  border-color: var(--color-gold);
+  box-shadow: 0 0 0 1.5px rgba(212, 163, 89, 0.3);
+  background: #ffffff;
+}
+
+.day-header-box {
+  background: #ffffff;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.4rem 0.2rem;
+  text-align: center;
+  border-top-left-radius: 0.85rem;
+  border-top-right-radius: 0.85rem;
+}
+
+/* كبسولات الأنشطة المضغوطة الأنيقة */
+.event-compact-pill {
+  cursor: pointer;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-right-width: 3.5px;
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  margin-bottom: 0.3rem;
+  transition: var(--transition);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.event-compact-pill:hover {
+  transform: scale(1.015);
+  box-shadow: 0 3px 8px rgba(11, 37, 51, 0.06);
+  border-color: var(--color-gold);
+}
+
+/* ألوان أشرطة الكبسولات */
+.pill-teal {
+  border-right-color: var(--color-teal) !important;
+}
+.pill-crimson {
+  border-right-color: var(--color-crimson) !important;
+}
+.pill-gold {
+  border-right-color: var(--color-gold) !important;
+}
+.pill-olive {
+  border-right-color: var(--color-olive) !important;
+}
+.pill-plum {
+  border-right-color: var(--color-plum-dark) !important;
+}
+
+/* ==========================================================================
+   4. الشارات والقائمة الجانبية وتجاوب الجوال
+   ========================================================================== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.badge-active {
+  background-color: #ebf8f9;
+  color: var(--color-teal);
+}
+.badge-completed {
+  background-color: #f0fdf4;
+  color: #166534;
+}
+.badge-pending {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+.badge-overdue {
+  background-color: #fff1f2;
+  color: var(--color-crimson);
+}
+.badge-exempt {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px dashed #94a3b8;
+}
+.badge-restricted {
+  background-color: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #f87171;
+}
+
+/* القائمة الجانبية الأنيقة */
+#main-sidebar {
+  border-left: 2px solid var(--color-gold) !important;
+}
+
+.nav-item-active {
+  background-color: var(--color-navy) !important;
+  color: #ffffff !important;
+  font-weight: 800;
+  border-right: 3.5px solid var(--color-gold) !important;
+}
+.nav-item-active i {
+  color: var(--color-gold) !important;
+}
+
+.nav-item {
+  transition: var(--transition);
+}
+.nav-item:hover:not(.nav-item-active) {
+  background-color: #f1f5f9;
+  color: var(--color-navy);
+}
+
+/* حركة الدرج الجانبي على الجوال */
+.sidebar-open {
+  transform: translateX(0) !important;
+}
+
+/* ==========================================================================
+   5. بطاقات هوية الطلاب (باركود حقيقي) والطباعة
+   ========================================================================== */
+
+/* شبكة معاينة البطاقات على الشاشة */
+.cards-grid {
+  display: grid;
+  gap: 10px;
+}
+.cards-cols-1 {
+  grid-template-columns: minmax(0, 300px);
+}
+.cards-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.cards-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* البطاقة نفسها */
+.student-id-badge {
+  background: #ffffff;
+  border: 1.6px solid var(--color-gold);
+  border-radius: 10px;
+  padding: 8px 9px;
+  height: 168px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: right;
+  page-break-inside: avoid;
+  break-inside: avoid;
+  overflow: hidden;
+}
+.student-id-badge.badge-compact {
+  height: 150px;
+  padding: 7px 8px;
+}
+
+.badge-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eef1f4;
+  padding-bottom: 5px;
+}
+.badge-logos {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.badge-logos img {
+  height: 20px;
+  width: auto;
+  object-fit: contain;
+}
+.badge-compact .badge-logos img {
+  height: 16px;
+}
+.badge-prog {
+  font-size: 8.5px;
+  font-weight: 900;
+  color: var(--color-navy);
+  background: #fbf3e6;
+  border: 1px solid rgba(212, 163, 89, 0.4);
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge-body {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+}
+.badge-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--color-navy);
+  color: var(--color-gold);
+  font-weight: 900;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(212, 163, 89, 0.4);
+  flex-shrink: 0;
+}
+.badge-compact .badge-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 10px;
+}
+.badge-info {
+  min-width: 0;
+  flex: 1;
+}
+.badge-name {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--color-navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.badge-compact .badge-name {
+  font-size: 11px;
+}
+.badge-num {
+  font-size: 9px;
+  font-weight: 700;
+  color: #64748b;
+  font-family: monospace;
+  letter-spacing: 0.5px;
+  margin-top: 1px;
+}
+
+.badge-codes {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+}
+.badge-barcode-box {
+  flex: 1;
+  min-width: 0;
+  background: #f8fafc;
+  border: 1px solid #e6eaef;
+  border-radius: 7px;
+  padding: 4px 5px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.badge-barcode {
+  width: 100%;
+  height: 36px;
+  display: block;
+}
+.badge-compact .badge-barcode {
+  height: 30px;
+}
+.badge-qr-box {
+  background: #f8fafc;
+  border: 1px solid #e6eaef;
+  border-radius: 7px;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.badge-qr {
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.badge-qr img,
+.badge-qr canvas {
+  width: 46px !important;
+  height: 46px !important;
+  display: block;
+}
+.badge-compact .badge-qr,
+.badge-compact .badge-qr img,
+.badge-compact .badge-qr canvas {
+  width: 40px !important;
+  height: 40px !important;
+}
+
+/* التبديل بين الباركود و QR في نافذة الطباعة */
+.code-barcode .badge-qr-box {
+  display: none;
+}
+.code-qr .badge-barcode-box {
+  display: none;
+}
+.code-qr .badge-qr-box {
+  flex: 1;
+}
+.code-qr .badge-qr,
+.code-qr .badge-qr img,
+.code-qr .badge-qr canvas {
+  width: 60px !important;
+  height: 60px !important;
+}
+
+/* ===== الطباعة ===== */
+@page {
+  size: A4;
+  margin: 8mm;
+}
+
+@media print {
+  /* الوضع العادي: إخفاء عناصر التحكم فقط */
+  header,
+  footer,
+  aside,
+  #sidebar-backdrop,
+  .print-hide,
+  #pwa-install-banner {
+    display: none !important;
   }
 
-  function saveLocal() {
-    try {
-      const snap = {};
-      DYNAMIC.forEach((c) => {
-        snap[c] = Array.isArray(window.db[c]) ? window.db[c] : [];
-      });
-      localStorage.setItem(LS_KEY, JSON.stringify(snap));
-    } catch (e) {
-      console.warn("تعذر الحفظ المحلي:", e);
-    }
+  html,
+  body {
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
   }
 
-  function applySnapshot(snap) {
-    if (!snap) return;
-    DYNAMIC.forEach((c) => {
-      if (Array.isArray(snap[c])) window.db[c] = snap[c];
-    });
+  /* عند طباعة البطاقات: أظهر نافذة البطاقات فقط، وأعِد ضبطها لتتدفق طبيعياً */
+  body.printing-cards > *:not(#student-cards-modal):not(#single-card-modal) {
+    display: none !important;
+  }
+  body.printing-cards #student-cards-modal,
+  body.printing-cards #single-card-modal {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+  body.printing-cards #student-cards-modal *,
+  body.printing-cards #single-card-modal * {
+    visibility: visible !important;
+  }
+  body.printing-cards #student-cards-modal > div,
+  body.printing-cards #single-card-modal > div,
+  body.printing-cards #student-cards-modal > div > div,
+  body.printing-cards #single-card-modal > div > div {
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+  body.printing-cards #print-area {
+    display: grid !important;
+    gap: 6mm !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+  body.printing-cards #print-area.cards-cols-1 {
+    grid-template-columns: 60mm !important;
+    justify-content: center;
+  }
+  body.printing-cards #print-area.cards-cols-2 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  body.printing-cards #print-area.cards-cols-3 {
+    grid-template-columns: repeat(3, 1fr) !important;
   }
 
-  function notify() {
-    if (typeof onChangeCb === "function") {
-      try {
-        onChangeCb();
-      } catch (e) {
-        console.warn(e);
-      }
-    }
+  .student-id-badge {
+    box-shadow: none !important;
+    border: 1.2px solid #333 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
-
-  // كتابة مجموعة واحدة إلى السحابة
-  function pushCollection(name) {
-    if (!fs || applyingRemote) return;
-    try {
-      fs.collection(FS_COLLECTION)
-        .doc(name)
-        .set({ items: window.db[name] || [], updatedAt: Date.now() })
-        .catch((e) => console.warn("تعذر الحفظ السحابي (" + name + "):", e));
-    } catch (e) {
-      console.warn("تعذر الحفظ السحابي:", e);
-    }
+  .badge-avatar,
+  .badge-prog {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
-
-  function pushAll() {
-    DYNAMIC.forEach(pushCollection);
-  }
-
-  function initFirestore() {
-    if (typeof firebase === "undefined" || !window.dbFirestore) return;
-    fs = window.dbFirestore;
-
-    fs.collection(FS_COLLECTION).onSnapshot(
-      (qs) => {
-        if (qs.empty && !firstSnapshotHandled) {
-          // أول تشغيل والسحابة فارغة: ارفع النسخة الحالية (المحلية أو البذور)
-          firstSnapshotHandled = true;
-          pushAll();
-          return;
-        }
-        const firstTime = !firstSnapshotHandled;
-        firstSnapshotHandled = true;
-        applyingRemote = true;
-        const present = {};
-        qs.forEach((doc) => {
-          const name = doc.id;
-          present[name] = true;
-          const data = doc.data() || {};
-          if (DYNAMIC.includes(name) && Array.isArray(data.items)) {
-            window.db[name] = data.items;
-          }
-        });
-        applyingRemote = false;
-        // تأكد من وجود حساب المدير وإعدادات التطبيق دائماً
-        const addedAdmin = ensureAdmin();
-        const fixedSettings = ensureAppSettings();
-        saveLocal();
-        if (addedAdmin) pushCollection("users");
-        if (fixedSettings) pushCollection("appSettings");
-        // أول مزامنة: ارفع أي مجموعة جديدة غير موجودة في السحابة بعد (ترقية آمنة)
-        if (firstTime) {
-          DYNAMIC.forEach((n) => {
-            if (!present[n]) pushCollection(n);
-          });
-        }
-        notify();
-      },
-      (err) => {
-        console.warn("تعذر الاتصال بالمزامنة السحابية، سيتم العمل محلياً:", err);
-      },
-    );
-  }
-
-  function ensureAdmin() {
-    if (!Array.isArray(window.db.users)) window.db.users = [];
-    if (!window.db.users.some((u) => u.role === "admin")) {
-      const seedAdmin =
-        (window.__DB_SEED__ &&
-          window.__DB_SEED__.users &&
-          window.__DB_SEED__.users.find((u) => u.role === "admin")) ||
-        null;
-      if (seedAdmin) {
-        window.db.users.unshift(JSON.parse(JSON.stringify(seedAdmin)));
-        return true;
-      }
-    }
-    return false;
-  }
-
-  // ضمان وجود وثيقة إعدادات التطبيق مع كل الحقول المطلوبة
-  function ensureAppSettings() {
-    const seed =
-      (window.__DB_SEED__ &&
-        window.__DB_SEED__.appSettings &&
-        window.__DB_SEED__.appSettings[0]) ||
-      {};
-    let changed = false;
-    if (!Array.isArray(window.db.appSettings)) {
-      window.db.appSettings = [];
-      changed = true;
-    }
-    let app = window.db.appSettings.find((s) => s && s.id === "app");
-    if (!app) {
-      app = JSON.parse(JSON.stringify(seed));
-      window.db.appSettings.unshift(app);
-      changed = true;
-    }
-    // دمج الحقول الناقصة من البذرة (لا يمسّ القيم الموجودة)
-    ["currentTerm", "terms", "waTemplates"].forEach((k) => {
-      if (app[k] === undefined && seed[k] !== undefined) {
-        app[k] = JSON.parse(JSON.stringify(seed[k]));
-        changed = true;
-      }
-    });
-    if (app.waTemplates && seed.waTemplates) {
-      Object.keys(seed.waTemplates).forEach((k) => {
-        if (app.waTemplates[k] === undefined) {
-          app.waTemplates[k] = seed.waTemplates[k];
-          changed = true;
-        }
-      });
-    }
-    return changed;
-  }
-
-  return {
-    // تهيئة الحفظ - تُستدعى مرة واحدة قبل أول رسم
-    init(onChange) {
-      onChangeCb = onChange || null;
-      const local = loadLocal();
-      if (local) applySnapshot(local);
-      ensureAdmin();
-      ensureAppSettings();
-      try {
-        initFirestore();
-      } catch (e) {
-        console.warn("تعذر تشغيل المزامنة السحابية:", e);
-      }
-    },
-
-    // حفظ مجموعة (أو أكثر) بعد أي تعديل: store.save("users") أو store.save("users", "notifications")
-    save(...names) {
-      saveLocal();
-      const list = names.length ? names : DYNAMIC;
-      list.forEach((n) => {
-        if (DYNAMIC.includes(n)) pushCollection(n);
-      });
-    },
-
-    saveAll() {
-      saveLocal();
-      pushAll();
-    },
-
-    isCloudConnected() {
-      return Boolean(fs);
-    },
-  };
-})();
+}
