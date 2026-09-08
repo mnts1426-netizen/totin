@@ -233,8 +233,10 @@ function overallDisciplineRate(programId) {
   });
   let present = 0,
     late = 0,
-    denom = 0;
+    denom = 0,
+    manual = 0;
   recs.forEach((r) => {
+    if (!r.auto) manual++;
     if (r.status === "حاضر") {
       present++;
       denom++;
@@ -243,9 +245,9 @@ function overallDisciplineRate(programId) {
       denom++;
     } else if (r.status === "غائب") denom++;
   });
-  return denom > 0
-    ? Math.round(((present + late * 0.5) / denom) * 100)
-    : null;
+  // لا نعرض نسبة إذا لم يُرصد أي حضور يدوياً بعد (كل السجلات تغييب تلقائي)
+  if (denom === 0 || manual === 0) return null;
+  return Math.round(((present + late * 0.5) / denom) * 100);
 }
 
 // هل للطالب عذر معتمد في هذا التاريخ؟
@@ -257,6 +259,17 @@ function hasApprovedExcuse(studentId, dateISO) {
       dateISO >= (e.fromDate || "") &&
       dateISO <= (e.toDate || e.fromDate || ""),
   );
+}
+
+function approvedExcuseReason(studentId, dateISO) {
+  const e = (window.db.excuseRequests || []).find(
+    (x) =>
+      x.studentId === studentId &&
+      x.status === "معتمد" &&
+      dateISO >= (x.fromDate || "") &&
+      dateISO <= (x.toDate || x.fromDate || ""),
+  );
+  return e ? e.reason || "" : "";
 }
 
 // هل المستخدم في منتصف كتابة داخل نموذج أو نافذة مفتوحة؟ (لتفادي مسح إدخاله عند وصول تحديث سحابي)
@@ -345,7 +358,68 @@ function initApp() {
   applyAccessLinkParams();
   sweepAutoAbsence();
   hideAppControls();
-  navigateTo("portal");
+
+  // استعادة جلسة الدخول السابقة إن وُجدت (تسجيل الدخول يبقى محفوظاً)
+  if (!restoreSession()) {
+    navigateTo("portal");
+  }
+}
+
+// ===== حفظ/استعادة جلسة الدخول =====
+const SESSION_KEY = "totin_session_v1";
+const SESSION_MAX_AGE = 45 * 24 * 60 * 60 * 1000; // 45 يوماً
+
+function saveSession() {
+  try {
+    if (!state.currentUser) return;
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({
+        userId: state.currentUser.id,
+        programId: state.currentProgramId,
+        portalMode: state.portalMode,
+        lockedProgramId: state.lockedProgramId,
+        ts: Date.now(),
+      }),
+    );
+  } catch (e) {}
+}
+
+function clearSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch (e) {}
+}
+
+function restoreSession() {
+  let s = null;
+  try {
+    s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+  } catch (e) {
+    s = null;
+  }
+  if (!s || !s.userId || !s.ts || Date.now() - s.ts > SESSION_MAX_AGE) {
+    return false;
+  }
+  const user = (window.db.users || []).find((u) => u.id === s.userId);
+  if (!user || user.isRestricted) {
+    clearSession();
+    return false;
+  }
+  // احترام قيود الرابط: رابط الطلاب للطلاب فقط والعكس
+  if (state.portalMode === "student" && user.role !== "student") return false;
+  if (state.portalMode === "staff" && user.role === "student") return false;
+
+  state.currentUser = user;
+  state.currentRole = user.role;
+  if (s.programId && isProgramActive(s.programId))
+    state.currentProgramId = s.programId;
+  else state.currentProgramId = firstActiveProgramId();
+
+  showAppControls(user);
+  updateNotificationsBadge();
+  navigateTo("home");
+  return true;
 }
 
 if (document.readyState === "loading") {
@@ -468,19 +542,26 @@ function handleLoginSubmit(programId) {
 
   state.currentUser = user;
   state.currentRole = user.role;
-  state.currentProgramId = programId;
+  state.currentProgramId = isProgramActive(programId)
+    ? programId
+    : firstActiveProgramId();
 
-  if (user.role === "student") {
+  if (user.role === "student" && isProgramActive(programId)) {
     user.currentProgramId = programId;
   }
 
   closeModal("login-modal");
   showAppControls(user);
   updateNotificationsBadge();
+  saveSession();
+  try {
+    logAudit("تسجيل دخول", `دخول ${user.role} إلى المنصة`);
+  } catch (e) {}
   navigateTo("home");
 }
 
 function logoutUser() {
+  clearSession();
   state.currentUser = null;
   state.currentRole = null;
   hideAppControls();
@@ -606,6 +687,36 @@ function navigateTo(viewName) {
         contentArea.innerHTML =
           window.views.renderDayReviewView && state.currentUser.role === "admin"
             ? window.views.renderDayReviewView()
+            : window.views.renderHome(state.currentUser);
+        break;
+      case "schedule-manage":
+        contentArea.innerHTML =
+          window.views.renderScheduleManageView &&
+          state.currentUser.role === "admin"
+            ? window.views.renderScheduleManageView()
+            : window.views.renderHome(state.currentUser);
+        break;
+      case "audit-log":
+        contentArea.innerHTML =
+          window.views.renderAuditLogView && state.currentUser.role === "admin"
+            ? window.views.renderAuditLogView()
+            : window.views.renderHome(state.currentUser);
+        break;
+      case "term-manage":
+        contentArea.innerHTML =
+          window.views.renderTermManageView && state.currentUser.role === "admin"
+            ? window.views.renderTermManageView()
+            : window.views.renderHome(state.currentUser);
+        break;
+      case "excuses":
+        contentArea.innerHTML = window.views.renderExcusesView
+          ? window.views.renderExcusesView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "my-report":
+        contentArea.innerHTML =
+          window.views.renderMyReportView && state.currentUser.role === "student"
+            ? window.views.renderMyReportView()
             : window.views.renderHome(state.currentUser);
         break;
       default:
@@ -875,13 +986,16 @@ function sweepAutoAbsence() {
               (r.date || "") === iso,
           );
           if (!exists) {
+            const excused = hasApprovedExcuse(st.id, iso);
+            const exReason = excused ? approvedExcuseReason(st.id, iso) : "";
             db.attendanceRecords.push({
               id: `att_${sch.id}_${st.id}_${iso}`,
               scheduleId: sch.id,
               studentId: st.id,
               programId: sch.programId,
               date: iso,
-              status: "غائب",
+              status: excused ? "مستأذن" : "غائب",
+              excuseReason: exReason,
               auto: true,
               updatedAt: `${iso} (تلقائي نهاية اليوم)`,
               recordedBy: "system",
@@ -987,6 +1101,7 @@ function toggleUserRestriction(userId) {
   user.isRestricted = !user.isRestricted;
   const statusText = user.isRestricted ? "تقييد" : "فك تقييد";
   persist("users");
+  logAudit(statusText + " حساب", user.name);
   alert(`تم ${statusText} حساب (${user.name}) بنجاح.`);
 
   if (user.role === "student") navigateTo("students");
@@ -1036,6 +1151,10 @@ function approveProfileEdit(editId) {
 
   db.pendingProfileEdits.splice(editIndex, 1);
   persist("users", "pendingProfileEdits", "notifications");
+  logAudit(
+    "اعتماد تعديل بيانات",
+    `${req.studentName || req.userName || "مستخدم"}${req.newPassword ? " (كلمة مرور)" : ""}`,
+  );
   alert(`تم اعتماد طلب (${req.studentName || req.userName || "المستخدم"}).`);
   navigateTo(state.currentView);
 }
@@ -1191,6 +1310,7 @@ function addNewStudent(data) {
   db.users.push(newStudent);
   persist("users");
   closeModal("add-student-modal");
+  logAudit("إضافة طالب", `${cleanName} - ${getProgramName(progId)}`);
   alert("تم إضافة الطالب بنجاح. كلمة المرور الافتراضية: 1234");
   navigateTo("students");
 }
@@ -1221,6 +1341,7 @@ function updateStudentData(studentId, data) {
 
   persist("users");
   closeModal("edit-student-modal");
+  logAudit("تعديل طالب", student.name);
   alert(`تم تحديث بيانات الطالب (${student.name}) بنجاح.`);
   navigateTo("students");
 }
@@ -1229,6 +1350,7 @@ function deleteStudent(studentId) {
   const student = db.users.find((u) => u.id === studentId);
   if (!student) return;
   if (!confirm(`هل أنت متأكد من حذف الطالب (${student.name}) نهائياً؟`)) return;
+  const nm = student.name;
   db.users = db.users.filter((u) => u.id !== studentId);
   db.attendanceRecords = (db.attendanceRecords || []).filter(
     (r) => r.studentId !== studentId,
@@ -1236,7 +1358,11 @@ function deleteStudent(studentId) {
   db.pendingProfileEdits = (db.pendingProfileEdits || []).filter(
     (e) => (e.userId || e.studentId) !== studentId,
   );
-  persist("users", "attendanceRecords", "pendingProfileEdits");
+  db.excuseRequests = (db.excuseRequests || []).filter(
+    (e) => e.studentId !== studentId,
+  );
+  persist("users", "attendanceRecords", "pendingProfileEdits", "excuseRequests");
+  logAudit("حذف طالب", nm);
   alert("تم حذف الطالب نهائياً.");
   navigateTo("students");
 }
@@ -1290,6 +1416,7 @@ function addNewSupervisor(data) {
   db.users.push(newSupervisor);
   persist("users");
   closeModal("add-supervisor-modal");
+  logAudit("إضافة مشرف", cleanName);
   alert("تم إضافة المشرف بنجاح. كلمة المرور الافتراضية: 1234");
   navigateTo("supervisors");
 }
@@ -1326,11 +1453,13 @@ function updateSupervisorData(supervisorId, data) {
 
   persist("users");
   closeModal("edit-supervisor-modal");
+  logAudit("تعديل حساب", sup.name);
   alert(`تم تحديث بيانات (${sup.name}) بنجاح.`);
   navigateTo("supervisors");
 }
 
 function deleteSupervisor(supervisorId) {
+  const sup = db.users.find((u) => u.id === supervisorId);
   if (!confirm("هل أنت متأكد من حذف هذا المشرف نهائياً؟")) return;
   db.users = db.users.filter((u) => u.id !== supervisorId);
   // فك ارتباط الطلاب بهذا المشرف
@@ -1339,6 +1468,7 @@ function deleteSupervisor(supervisorId) {
       u.supervisorId = null;
   });
   persist("users");
+  logAudit("حذف مشرف", sup ? sup.name : supervisorId);
   navigateTo("supervisors");
 }
 
@@ -1382,6 +1512,7 @@ function addNewAdmin(data) {
   db.users.push(newAdmin);
   persist("users");
   closeModal("add-admin-modal");
+  logAudit("إضافة إداري", cleanName);
   alert("تم إضافة الحساب الإداري بنجاح. كلمة المرور الافتراضية: 1234");
   navigateTo("supervisors");
 }
@@ -1397,8 +1528,10 @@ function deleteAdmin(adminId) {
     return;
   }
   if (!confirm("هل أنت متأكد من حذف هذا الحساب الإداري نهائياً؟")) return;
+  const a = db.users.find((u) => u.id === adminId);
   db.users = db.users.filter((u) => u.id !== adminId);
   persist("users");
+  logAudit("حذف إداري", a ? a.name : adminId);
   navigateTo("supervisors");
 }
 
@@ -1493,13 +1626,19 @@ function updateProfile() {
 }
 
 // 18. نظام التحضير الذكي (كل سجل مرتبط بتاريخ محدد)
-function recordAttendance(scheduleId, studentId, status, date, skipPersist) {
+function recordAttendance(scheduleId, studentId, status, date, skipPersist, reason) {
   if (!db.attendanceRecords) db.attendanceRecords = [];
   const d = date || attendanceContextDate();
 
   const schedule = (db.schedules || []).find((s) => s.id === scheduleId);
   const now = new Date();
   const timeStr = `${now.toLocaleDateString("ar-SA")} - ${now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`;
+  const exReason =
+    reason !== undefined
+      ? cleanText(reason, 200)
+      : status === "مستأذن"
+        ? approvedExcuseReason(studentId, d)
+        : "";
 
   let record = db.attendanceRecords.find(
     (r) =>
@@ -1512,6 +1651,8 @@ function recordAttendance(scheduleId, studentId, status, date, skipPersist) {
     record.status = status;
     record.updatedAt = timeStr;
     record.auto = false;
+    if (status === "مستأذن") record.excuseReason = exReason;
+    else delete record.excuseReason;
     record.recordedBy = state.currentUser ? state.currentUser.id : "system";
   } else {
     db.attendanceRecords.push({
@@ -1521,6 +1662,7 @@ function recordAttendance(scheduleId, studentId, status, date, skipPersist) {
       programId: schedule ? schedule.programId : null,
       date: d,
       status: status,
+      excuseReason: status === "مستأذن" ? exReason : "",
       auto: false,
       updatedAt: timeStr,
       recordedBy: state.currentUser ? state.currentUser.id : "system",
@@ -1531,6 +1673,17 @@ function recordAttendance(scheduleId, studentId, status, date, skipPersist) {
 
   if (window.views && window.views.updateAttendanceModalView) {
     window.views.updateAttendanceModalView(scheduleId);
+  }
+}
+
+// من واجهة التحضير: عند اختيار "مستأذن" نطلب سبب العذر (إن لم يكن هناك عذر معتمد)
+function handleAttendanceChange(scheduleId, studentId, status, date) {
+  const d = date || attendanceContextDate();
+  if (status === "مستأذن" && !approvedExcuseReason(studentId, d)) {
+    const r = prompt("سبب الاستئذان (اختياري):", "");
+    recordAttendance(scheduleId, studentId, status, d, false, r || "");
+  } else {
+    recordAttendance(scheduleId, studentId, status, d);
   }
 }
 
@@ -1740,6 +1893,373 @@ function shiftReviewDate(deltaDays) {
   d.setDate(d.getDate() + deltaDays);
   state.reviewDate = localDateStr(d);
   navigateTo("day-review");
+}
+
+// =====================================================================
+// إدارة جلسات الجدول (المدير) - CRUD
+// =====================================================================
+function addSchedule(data) {
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  const title = cleanText(data.title, 120);
+  const programId = isProgramActive(data.programId)
+    ? data.programId
+    : firstActiveProgramId();
+  if (!title) {
+    alert("عنوان الجلسة مطلوب.");
+    return;
+  }
+  const grp = (db.groups || []).find((g) => g.programId === programId);
+  if (!Array.isArray(db.schedules)) db.schedules = [];
+  db.schedules.push({
+    id: makeId("sch"),
+    programId: programId,
+    groupId: grp ? grp.id : null,
+    dayOfWeek: parseInt(data.dayOfWeek, 10) || 0,
+    time: cleanText(data.time, 20) || "05:00 م",
+    title: title,
+    type: "lesson",
+    typeLabel: cleanText(data.typeLabel, 20) || "درس",
+    status: "قادم",
+    requiresAttendance: data.requiresAttendance !== false,
+    details: cleanText(data.details, 400),
+    createdAt: Date.now(),
+  });
+  persist("schedules");
+  logAudit("إضافة جلسة", `${title} - ${getProgramName(programId)}`);
+  closeModal("schedule-modal");
+  alert("تم إضافة الجلسة.");
+  navigateTo("schedule-manage");
+}
+
+function updateSchedule(schId, data) {
+  const sch = (db.schedules || []).find((s) => s.id === schId);
+  if (!sch || !state.currentUser || state.currentUser.role !== "admin") return;
+  if (data.title !== undefined) sch.title = cleanText(data.title, 120) || sch.title;
+  if (isProgramActive(data.programId)) {
+    sch.programId = data.programId;
+    const grp = (db.groups || []).find((g) => g.programId === data.programId);
+    sch.groupId = grp ? grp.id : sch.groupId;
+  }
+  if (data.dayOfWeek !== undefined) sch.dayOfWeek = parseInt(data.dayOfWeek, 10) || 0;
+  if (data.time !== undefined) sch.time = cleanText(data.time, 20) || sch.time;
+  if (data.typeLabel !== undefined)
+    sch.typeLabel = cleanText(data.typeLabel, 20) || sch.typeLabel;
+  if (data.requiresAttendance !== undefined)
+    sch.requiresAttendance = !!data.requiresAttendance;
+  if (data.details !== undefined) sch.details = cleanText(data.details, 400);
+  persist("schedules");
+  logAudit("تعديل جلسة", sch.title);
+  closeModal("schedule-modal");
+  alert("تم حفظ التعديلات.");
+  navigateTo("schedule-manage");
+}
+
+function deleteSchedule(schId) {
+  const sch = (db.schedules || []).find((s) => s.id === schId);
+  if (!sch) return;
+  if (
+    !confirm(
+      `حذف الجلسة (${sch.title})؟ لن تُحذف سجلات الحضور السابقة المرتبطة بها.`,
+    )
+  )
+    return;
+  db.schedules = db.schedules.filter((s) => s.id !== schId);
+  persist("schedules");
+  logAudit("حذف جلسة", sch.title);
+  navigateTo("schedule-manage");
+}
+
+// =====================================================================
+// الاستئذان المسبق
+// =====================================================================
+function submitExcuseRequest(data) {
+  const me = state.currentUser;
+  if (!me) return;
+  const studentId = me.role === "student" ? me.id : data.studentId;
+  const student = db.users.find((u) => u.id === studentId);
+  if (!student) {
+    alert("الطالب غير موجود.");
+    return;
+  }
+  const fromDate = data.fromDate;
+  const toDate = data.toDate || data.fromDate;
+  const reason = cleanText(data.reason, 300);
+  if (!fromDate || !reason) {
+    alert("يرجى تحديد التاريخ وكتابة السبب.");
+    return;
+  }
+  if (!Array.isArray(db.excuseRequests)) db.excuseRequests = [];
+
+  // المدير/المشرف يعتمد مباشرة؛ الطالب يقدّم طلباً بانتظار الاعتماد
+  const autoApprove = me.role === "admin" || me.role === "supervisor";
+  db.excuseRequests.unshift({
+    id: makeId("exc"),
+    studentId: studentId,
+    studentName: cleanText(student.name, 80),
+    programId: student.currentProgramId,
+    fromDate: fromDate,
+    toDate: toDate,
+    reason: reason,
+    status: autoApprove ? "معتمد" : "بانتظار الاعتماد",
+    requestedBy: me.id,
+    requestedByRole: me.role,
+    decidedBy: autoApprove ? me.id : null,
+    createdAt: Date.now(),
+  });
+  persist("excuseRequests");
+
+  if (autoApprove) {
+    applyExcuseToAttendance(db.excuseRequests[0]);
+    logAudit("اعتماد استئذان", `${student.name} (${fromDate} - ${toDate})`);
+  } else {
+    db.notifications.unshift({
+      id: makeId("notif"),
+      userId: "admin",
+      category: "طلب استئذان",
+      title: "طلب استئذان جديد",
+      message: `${student.name} يطلب استئذاناً (${fromDate}) - السبب: ${reason}`,
+      date: "الآن",
+      isRead: false,
+    });
+    persist("notifications");
+    updateNotificationsBadge();
+    logAudit("تقديم استئذان", `${fromDate} - ${reason}`);
+  }
+
+  closeModal("excuse-modal");
+  alert(
+    autoApprove
+      ? "تم اعتماد الاستئذان."
+      : "تم إرسال طلب الاستئذان للاعتماد من الإدارة.",
+  );
+  navigateTo(state.currentView);
+}
+
+function decideExcuseRequest(reqId, approve) {
+  const req = (db.excuseRequests || []).find((e) => e.id === reqId);
+  if (!req || !state.currentUser) return;
+  if (state.currentUser.role === "student") return;
+
+  req.status = approve ? "معتمد" : "مرفوض";
+  req.decidedBy = state.currentUser.id;
+  if (approve) applyExcuseToAttendance(req);
+
+  db.notifications.unshift({
+    id: makeId("notif"),
+    userId: req.studentId,
+    category: "استئذان",
+    title: approve ? "تم اعتماد استئذانك" : "تم رفض طلب الاستئذان",
+    message: `بخصوص ${req.fromDate}${req.toDate && req.toDate !== req.fromDate ? " إلى " + req.toDate : ""}`,
+    date: "الآن",
+    isRead: false,
+  });
+  persist("excuseRequests", "notifications");
+  updateNotificationsBadge();
+  logAudit(
+    approve ? "اعتماد استئذان" : "رفض استئذان",
+    `${req.studentName} (${req.fromDate})`,
+  );
+  navigateTo(state.currentView);
+}
+
+// تحويل الاستئذان المعتمد إلى سجلات حضور "مستأذن" لكل جلسة تتطلب تحضيراً في الفترة
+function applyExcuseToAttendance(req) {
+  if (!req || req.status !== "معتمد") return;
+  if (!Array.isArray(db.attendanceRecords)) db.attendanceRecords = [];
+  const from = new Date(req.fromDate + "T00:00:00");
+  const to = new Date((req.toDate || req.fromDate) + "T00:00:00");
+  let changed = false;
+
+  for (
+    let d = new Date(from);
+    d <= to && (d - from) / 86400000 <= 31;
+    d.setDate(d.getDate() + 1)
+  ) {
+    const iso = localDateStr(d);
+    const wd = d.getDay();
+    (db.schedules || [])
+      .filter(
+        (s) =>
+          s.requiresAttendance &&
+          s.dayOfWeek === wd &&
+          s.programId === req.programId,
+      )
+      .forEach((sch) => {
+        let rec = db.attendanceRecords.find(
+          (r) =>
+            r.scheduleId === sch.id &&
+            r.studentId === req.studentId &&
+            (r.date || "") === iso,
+        );
+        if (rec) {
+          if (rec.status === "غائب" || rec.auto) {
+            rec.status = "مستأذن";
+            rec.excuseReason = req.reason;
+            rec.auto = false;
+            changed = true;
+          }
+        } else {
+          db.attendanceRecords.push({
+            id: `att_${sch.id}_${req.studentId}_${iso}`,
+            scheduleId: sch.id,
+            studentId: req.studentId,
+            programId: sch.programId,
+            date: iso,
+            status: "مستأذن",
+            excuseReason: req.reason,
+            auto: false,
+            updatedAt: `${iso} (استئذان معتمد)`,
+            recordedBy: "excuse",
+          });
+          changed = true;
+        }
+      });
+  }
+  if (changed) persist("attendanceRecords");
+}
+
+// =====================================================================
+// الفصل الدراسي
+// =====================================================================
+function startNewTerm(name, startDate) {
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  const app = getAppSettings();
+  const tName = cleanText(name, 60) || "فصل جديد";
+  const sDate = startDate || todayStr();
+  const term = { id: makeId("term"), name: tName, startDate: sDate };
+  if (!Array.isArray(app.terms)) app.terms = [];
+  app.terms.push(term);
+  app.currentTerm = term;
+  persist("appSettings");
+  logAudit("بدء فصل دراسي جديد", `${tName} - يبدأ ${sDate}`);
+  alert(
+    `تم بدء «${tName}». تبقى كل البيانات السابقة محفوظة، والإحصاءات الآن تعرض الفصل الجديد.`,
+  );
+  navigateTo("term-manage");
+}
+
+function updateCurrentTerm(name, startDate) {
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  const app = getAppSettings();
+  if (!app.currentTerm) app.currentTerm = { id: makeId("term") };
+  if (name !== undefined)
+    app.currentTerm.name = cleanText(name, 60) || app.currentTerm.name;
+  if (startDate) app.currentTerm.startDate = startDate;
+  // مزامنة القائمة
+  if (Array.isArray(app.terms)) {
+    const t = app.terms.find((x) => x.id === app.currentTerm.id);
+    if (t) {
+      t.name = app.currentTerm.name;
+      t.startDate = app.currentTerm.startDate;
+    }
+  }
+  persist("appSettings");
+  logAudit("تعديل الفصل الحالي", app.currentTerm.name);
+  alert("تم حفظ إعدادات الفصل.");
+  navigateTo("term-manage");
+}
+
+// =====================================================================
+// تقييم مهمة طالب
+// =====================================================================
+function saveTaskEvaluation(taskId, rating, note) {
+  const task = (db.tasks || []).find((t) => t.id === taskId);
+  if (!task || !state.currentUser) return;
+  if (state.currentUser.role === "student") return;
+  if (!Array.isArray(db.taskEvaluations)) db.taskEvaluations = [];
+
+  let ev = db.taskEvaluations.find((e) => e.taskId === taskId);
+  const clean = {
+    rating: cleanText(rating, 20),
+    note: cleanText(note, 300),
+    by: state.currentUser.id,
+    byName: cleanText(state.currentUser.name, 60),
+    at: new Date().toLocaleString("ar-SA"),
+  };
+  if (ev) {
+    Object.assign(ev, clean);
+  } else {
+    ev = Object.assign({ id: makeId("ev"), taskId: taskId }, clean);
+    db.taskEvaluations.push(ev);
+  }
+  // وسم المهمة كمقيّمة
+  if (rating && task.status !== "مكتملة") {
+    task.status = "مكتملة";
+    task.completedAt = clean.at;
+  }
+  persist("taskEvaluations", "tasks");
+
+  db.notifications.unshift({
+    id: makeId("notif"),
+    userId: task.assignedTo,
+    category: "تقييم مهمة",
+    title: "تم تقييم مهمتك",
+    message: `${task.title}: ${clean.rating || ""} ${clean.note ? "- " + clean.note : ""}`,
+    date: "الآن",
+    isRead: false,
+  });
+  persist("notifications");
+  updateNotificationsBadge();
+  logAudit("تقييم مهمة", `${task.title} (${clean.rating})`);
+  closeModal("task-modal");
+  alert("تم حفظ التقييم.");
+  navigateTo(state.currentView);
+}
+
+function getTaskEvaluation(taskId) {
+  return (db.taskEvaluations || []).find((e) => e.taskId === taskId) || null;
+}
+
+// =====================================================================
+// واتساب - فتح محادثة برسالة جاهزة
+// =====================================================================
+function openWhatsApp(phone, text) {
+  const url = waLink(phone, text);
+  if (!url) {
+    alert("رقم الجوال غير صالح لفتح واتساب.");
+    return;
+  }
+  window.open(url, "_blank");
+}
+
+// إرسال تقرير طالب عبر واتساب لولي الأمر
+function waStudentReport(studentId) {
+  const st = db.users.find((u) => u.id === studentId);
+  if (!st) return;
+  const app = getAppSettings();
+  const stats = studentAttendanceStats(studentId);
+  const prog = getProgramName(st.currentProgramId);
+  const msg = fillTemplate(
+    (app.waTemplates && app.waTemplates.report) || "",
+    {
+      student: st.name,
+      program: prog,
+      present: stats.present,
+      absent: stats.absent,
+      late: stats.late,
+      rate: stats.rate,
+      note: "",
+    },
+  );
+  openWhatsApp(st.fatherPhone || st.phone, msg);
+  logAudit("إرسال تقرير واتساب", st.name);
+}
+
+// إشعار غياب طالب عبر واتساب
+function waAbsenceNotice(studentId, dateISO) {
+  const st = db.users.find((u) => u.id === studentId);
+  if (!st) return;
+  const app = getAppSettings();
+  const msg = fillTemplate(
+    (app.waTemplates && app.waTemplates.absence) || "",
+    {
+      student: st.name,
+      date: dateISO || todayStr(),
+      program: getProgramName(st.currentProgramId),
+    },
+  );
+  openWhatsApp(st.fatherPhone || st.phone, msg);
+  logAudit("إشعار غياب واتساب", `${st.name} (${dateISO || todayStr()})`);
 }
 
 // 21. دوال مساعدة
