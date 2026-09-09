@@ -937,6 +937,9 @@ function handleStudentExcelImport(event) {
       skipped = 0;
     const problems = [];
 
+    const normName = (s) =>
+      cleanText(s, 80).replace(/\s+/g, " ").replace(/[أإآ]/g, "ا").trim();
+
     rows.forEach((row, i) => {
       const name = cleanText(
         pickCol(row, ["الاسم", "اسم", "الطالب", "name"]),
@@ -959,19 +962,44 @@ function handleStudentExcelImport(event) {
         return;
       }
 
-      // مطابقة موجود بالجوال أو الهوية => تحديث بدل التخطي (يجعل إعادة الاستيراد آمنة)
-      const existing = db.users.find(
+      // 1) مطابقة موجود بالجوال أو الهوية
+      let existing = db.users.find(
         (u) =>
           u.role === "student" &&
           (normalizeDigits(u.phone) === phone ||
             (nationalId && normalizeDigits(u.nationalId) === nationalId)),
       );
 
+      // 2) وإلا: مطابقة بالاسم (لتصحيح أرقام حسابات مُدخلة بأرقام خاطئة)
+      if (!existing) {
+        const byName = db.users.filter(
+          (u) => u.role === "student" && normName(u.name) === normName(name),
+        );
+        if (byName.length === 1) existing = byName[0];
+        else if (byName.length > 1) {
+          skipped++;
+          problems.push(`صف ${i + 2} (${name}): يوجد أكثر من طالب بنفس الاسم — صحّحه يدوياً`);
+          return;
+        }
+      }
+
       if (existing) {
+        // منع تعارض الرقم الجديد مع حساب آخر
+        if (
+          isPhoneTaken(phone, existing.id) ||
+          (nationalId && isNationalIdTaken(nationalId, existing.id))
+        ) {
+          skipped++;
+          problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
+          return;
+        }
         existing.name = name;
         existing.avatar = name.substring(0, 2);
+        existing.phone = phone;
         if (nationalId) existing.nationalId = nationalId;
         if (fatherPhone) existing.fatherPhone = fatherPhone;
+        if (!existing.email || /^[^@]{0,3}@totin\.sa$/.test(existing.email))
+          existing.email = `${phone}@totin.sa`;
         updated++;
         return;
       }
@@ -1104,6 +1132,43 @@ function handleSupervisorExcelImport(event) {
     alert(msg);
     navigateTo("supervisors");
   });
+}
+
+// تصدير قائمة الطلاب الحاليين إلى Excel (لتعبئة الأرقام الصحيحة ثم إعادة الاستيراد)
+function exportStudentsExcel() {
+  const students = db.users
+    .filter((u) => u.role === "student")
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+  const rows = [["الاسم", "رقم الجوال", "رقم الهوية", "جوال ولي الأمر"]];
+  students.forEach((s) => {
+    rows.push([
+      s.name || "",
+      /^\d{9,}$/.test(String(s.phone || "").replace(/\D/g, "")) ? s.phone : "",
+      /^\d{9,}$/.test(String(s.nationalId || "").replace(/\D/g, ""))
+        ? s.nationalId
+        : "",
+      s.fatherPhone || "",
+    ]);
+  });
+  try {
+    if (typeof XLSX !== "undefined") {
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 34 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "الطلاب");
+      XLSX.writeFile(wb, "الطلاب_للتعبئة.xlsx");
+      return;
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+  const csv =
+    "﻿" + rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "الطلاب_للتعبئة.csv";
+  a.click();
 }
 
 // تنزيل قالب Excel للاستيراد
