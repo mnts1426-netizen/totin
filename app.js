@@ -125,6 +125,14 @@ window.escHtml = escHtml;
 window.cleanText = cleanText;
 
 function persist(...collections) {
+  // تقليم الإشعارات الأقدم لإبقاء الوثيقة صغيرة (الإشعارات مؤقتة بطبيعتها)
+  if (
+    collections.indexOf("notifications") > -1 &&
+    Array.isArray(window.db.notifications) &&
+    window.db.notifications.length > 500
+  ) {
+    window.db.notifications = window.db.notifications.slice(0, 500);
+  }
   if (window.store && typeof window.store.save === "function") {
     window.store.save(...collections);
   }
@@ -198,12 +206,123 @@ function logAudit(action, details) {
   persist("auditLog");
 }
 
+// ===== الأرشفة: سجلات التحضير الحيّة + المحمّلة من الأرشيف =====
+window.__attArchLoaded = window.__attArchLoaded || {}; // { "2026-03": true }
+let __attArchiveCheckedThisSession = false;
+
+// أقدم تاريخ يبقى في الوثيقة الحيّة (100 يوم أو بداية الفصل، أيهما أبعد)
+function liveAttendanceCutoff() {
+  const d = new Date();
+  d.setDate(d.getDate() - 100);
+  const byDays = localDateStr(d);
+  const t = termStartDate();
+  return byDays < t ? byDays : t;
+}
+
+// كل سجلات التحضير المتاحة حالياً (الحيّة + ما حُمّل من الأرشيف) بلا تكرار
+function getAttendanceRecords() {
+  const live = Array.isArray(window.db.attendanceRecords)
+    ? window.db.attendanceRecords
+    : [];
+  const arch = Array.isArray(window.db._attArch) ? window.db._attArch : [];
+  if (!arch.length) return live;
+  const map = new Map();
+  arch.forEach((r) => r && r.id && map.set(r.id, r));
+  live.forEach((r) => r && r.id && map.set(r.id, r));
+  return Array.from(map.values());
+}
+
+// تحميل أشهر الأرشيف اللازمة لتغطية نطاق تاريخي (يُستدعى قبل عرض تقارير/أيام قديمة)
+function ensureAttendanceArchive(fromISO, toISO, cb) {
+  if (!window.store || typeof window.store.loadArchive !== "function") {
+    if (cb) cb();
+    return;
+  }
+  const months = [];
+  const cur = new Date((fromISO || "2000-01-01") + "T00:00:00");
+  const end = new Date((toISO || todayStr()) + "T00:00:00");
+  while (cur <= end && months.length < 60) {
+    const key = localDateStr(cur).slice(0, 7);
+    if (!window.__attArchLoaded[key]) months.push(key);
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  if (months.length === 0) {
+    if (cb) cb();
+    return;
+  }
+  if (!window.db._attArch) window.db._attArch = [];
+  let pending = months.length;
+  months.forEach((key) => {
+    window.store.loadArchive("attendanceRecords", key).then((items) => {
+      window.__attArchLoaded[key] = true;
+      (items || []).forEach((r) => {
+        if (r && r.id && !window.db._attArch.some((x) => x.id === r.id))
+          window.db._attArch.push(r);
+      });
+      if (--pending === 0 && cb) cb();
+    });
+  });
+}
+
+// أرشفة السجلات الأقدم من الحدّ الحيّ (المدير فقط، مرة كل جلسة، عند تجاوز عتبة)
+function maybeArchiveAttendance() {
+  if (__attArchiveCheckedThisSession) return;
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  if (!window.store || !window.store.firstSyncDone()) return;
+  const live = window.db.attendanceRecords || [];
+  if (live.length < 1200) return; // لا داعي قبل ذلك
+  __attArchiveCheckedThisSession = true;
+  const cutoff = liveAttendanceCutoff();
+  window.store
+    .archiveOld(
+      "attendanceRecords",
+      (r) => (r.date || "") < cutoff,
+      (r) => (r.date || "2000-01").slice(0, 7),
+    )
+    .then((res) => {
+      if (res.moved > 0) {
+        logAudit("أرشفة تلقائية", `${res.moved} سجل تحضير قديم`);
+        navigateTo(state.currentView);
+      }
+    });
+}
+
+// أرشفة يدوية فورية (زر في شاشة الفصل الدراسي)
+function archiveAttendanceNow() {
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  const cutoff = liveAttendanceCutoff();
+  const n = (window.db.attendanceRecords || []).filter(
+    (r) => (r.date || "") < cutoff,
+  ).length;
+  if (n === 0) {
+    alert("لا توجد سجلات قديمة للأرشفة. كل السجلات ضمن الفترة الحيّة.");
+    return;
+  }
+  if (
+    !confirm(
+      `أرشفة (${n}) سجل تحضير أقدم من ${cutoff}؟\nتبقى محفوظة بالكامل وتظهر عند مراجعة تلك الأيام.`,
+    )
+  )
+    return;
+  window.store
+    .archiveOld(
+      "attendanceRecords",
+      (r) => (r.date || "") < cutoff,
+      (r) => (r.date || "2000-01").slice(0, 7),
+    )
+    .then((res) => {
+      logAudit("أرشفة يدوية", `${res.moved} سجل`);
+      alert(`تمت أرشفة (${res.moved}) سجل.`);
+      navigateTo("term-manage");
+    });
+}
+
 // ===== إحصاءات الحضور الحقيقية =====
 // حساب إحصاء حضور طالب واحد ضمن نطاق تاريخي
 function studentAttendanceStats(studentId, fromISO, toISO) {
   const from = fromISO || termStartDate();
   const to = toISO || todayStr();
-  const recs = (window.db.attendanceRecords || []).filter(
+  const recs = getAttendanceRecords().filter(
     (r) =>
       r.studentId === studentId &&
       (r.date || "") >= from &&
@@ -226,7 +345,7 @@ function studentAttendanceStats(studentId, fromISO, toISO) {
 function overallDisciplineRate(programId) {
   const from = termStartDate();
   const activeIds = getActivePrograms().map((p) => p.id);
-  const recs = (window.db.attendanceRecords || []).filter((r) => {
+  const recs = getAttendanceRecords().filter((r) => {
     if ((r.date || "") < from) return false;
     if (programId) return r.programId === programId;
     return !r.programId || activeIds.includes(r.programId);
@@ -333,6 +452,11 @@ function initApp() {
     window.store.init(() => {
       try {
         sweepAutoAbsence();
+      } catch (e) {
+        console.warn(e);
+      }
+      try {
+        maybeArchiveAttendance();
       } catch (e) {
         console.warn(e);
       }
@@ -1831,9 +1955,11 @@ function handleAttendanceChange(scheduleId, studentId, status, date) {
 }
 
 function getStudentAttendanceStatus(scheduleId, studentId, date) {
-  if (!db.attendanceRecords) return "غير محدد";
   const d = date || attendanceContextDate();
-  const record = db.attendanceRecords.find(
+  // للتواريخ القديمة نبحث في الحيّ + الأرشيف المحمّل
+  const source =
+    d < liveAttendanceCutoff() ? getAttendanceRecords() : db.attendanceRecords || [];
+  const record = source.find(
     (r) =>
       r.scheduleId === scheduleId &&
       r.studentId === studentId &&
@@ -2275,10 +2401,33 @@ function startNewTerm(name, startDate) {
   app.currentTerm = term;
   persist("appSettings");
   logAudit("بدء فصل دراسي جديد", `${tName} - يبدأ ${sDate}`);
-  alert(
-    `تم بدء «${tName}». تبقى كل البيانات السابقة محفوظة، والإحصاءات الآن تعرض الفصل الجديد.`,
-  );
-  navigateTo("term-manage");
+
+  // أرشفة سجلات التحضير الأقدم من بداية الفصل الجديد (تبقى محفوظة بالكامل)
+  const doneMsg = `تم بدء «${tName}». تبقى كل البيانات السابقة محفوظة، والإحصاءات الآن تعرض الفصل الجديد.`;
+  if (window.store && typeof window.store.archiveOld === "function") {
+    window.store
+      .archiveOld(
+        "attendanceRecords",
+        (r) => (r.date || "") < sDate,
+        (r) => (r.date || "2000-01").slice(0, 7),
+      )
+      .then((res) => {
+        alert(
+          doneMsg +
+            (res.moved > 0
+              ? `\nتمت أرشفة (${res.moved}) سجل تحضير من الفصل السابق.`
+              : ""),
+        );
+        navigateTo("term-manage");
+      })
+      .catch(() => {
+        alert(doneMsg);
+        navigateTo("term-manage");
+      });
+  } else {
+    alert(doneMsg);
+    navigateTo("term-manage");
+  }
 }
 
 function updateCurrentTerm(name, startDate) {
