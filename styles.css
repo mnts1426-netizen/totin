@@ -256,6 +256,49 @@ body {
 .cards-cols-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.cards-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* أحجام البطاقة (معاينة الشاشة) - الطباعة تضبط الارتفاع بالمليمتر أدناه */
+.size-xl .student-id-badge {
+  height: 200px;
+}
+.size-lg .student-id-badge {
+  height: 168px;
+}
+.size-md .student-id-badge {
+  height: 140px;
+}
+.size-sm .student-id-badge {
+  height: 116px;
+}
+.size-xs .student-id-badge {
+  height: 96px;
+}
+.size-xs .badge-name,
+.size-sm .badge-name {
+  font-size: 10px;
+}
+.size-xs .badge-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 9px;
+}
+.size-xs .badge-logos img {
+  height: 13px;
+}
+.size-xs .badge-barcode,
+.size-xs .badge-qr,
+.size-xs .badge-qr img,
+.size-xs .badge-qr canvas {
+  height: 26px !important;
+}
+.size-xs .badge-qr,
+.size-xs .badge-qr img,
+.size-xs .badge-qr canvas {
+  width: 26px !important;
+}
 
 /* البطاقة نفسها */
 .student-id-badge {
@@ -357,7 +400,14 @@ body {
   margin-top: 1px;
 }
 
+.badge-codes {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+}
 .badge-barcode-box {
+  flex: 1;
+  min-width: 0;
   background: #f8fafc;
   border: 1px solid #e6eaef;
   border-radius: 7px;
@@ -373,6 +423,52 @@ body {
 }
 .badge-compact .badge-barcode {
   height: 30px;
+}
+.badge-qr-box {
+  background: #f8fafc;
+  border: 1px solid #e6eaef;
+  border-radius: 7px;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.badge-qr {
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.badge-qr img,
+.badge-qr canvas {
+  width: 46px !important;
+  height: 46px !important;
+  display: block;
+}
+.badge-compact .badge-qr,
+.badge-compact .badge-qr img,
+.badge-compact .badge-qr canvas {
+  width: 40px !important;
+  height: 40px !important;
+}
+
+/* التبديل بين الباركود و QR في نافذة الطباعة */
+.code-barcode .badge-qr-box {
+  display: none;
+}
+.code-qr .badge-barcode-box {
+  display: none;
+}
+.code-qr .badge-qr-box {
+  flex: 1;
+}
+.code-qr .badge-qr,
+.code-qr .badge-qr img,
+.code-qr .badge-qr canvas {
+  width: 60px !important;
+  height: 60px !important;
 }
 
 /* ===== الطباعة ===== */
@@ -435,12 +531,13 @@ body {
   }
   body.printing-cards #print-area {
     display: grid !important;
-    gap: 6mm !important;
+    gap: 5mm !important;
     padding: 0 !important;
     background: #ffffff !important;
+    align-content: start !important;
   }
   body.printing-cards #print-area.cards-cols-1 {
-    grid-template-columns: 60mm !important;
+    grid-template-columns: 70mm !important;
     justify-content: center;
   }
   body.printing-cards #print-area.cards-cols-2 {
@@ -448,6 +545,48 @@ body {
   }
   body.printing-cards #print-area.cards-cols-3 {
     grid-template-columns: repeat(3, 1fr) !important;
+  }
+  body.printing-cards #print-area.cards-cols-4 {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 4mm !important;
+  }
+
+  /* ارتفاع البطاقة حسب الحجم المطلوب (لضمان العدد المحدد في كل ورقة A4) */
+  body.printing-cards #print-area.size-xl .student-id-badge {
+    height: 128mm !important;
+  }
+  body.printing-cards #print-area.size-lg .student-id-badge {
+    height: 88mm !important;
+  }
+  body.printing-cards #print-area.size-md .student-id-badge {
+    height: 62mm !important;
+  }
+  body.printing-cards #print-area.size-sm .student-id-badge {
+    height: 49mm !important;
+  }
+  body.printing-cards #print-area.size-xs .student-id-badge {
+    height: 39mm !important;
+    padding: 4px 5px !important;
+  }
+  body.printing-cards #print-area.size-xs .badge-logos img {
+    height: 11px !important;
+  }
+  body.printing-cards #print-area.size-xs .badge-avatar {
+    width: 20px !important;
+    height: 20px !important;
+    font-size: 8px !important;
+  }
+  body.printing-cards #print-area.size-xs .badge-name {
+    font-size: 9px !important;
+  }
+  body.printing-cards #print-area.size-xs .badge-barcode {
+    height: 22px !important;
+  }
+  body.printing-cards #print-area.size-xs .badge-qr,
+  body.printing-cards #print-area.size-xs .badge-qr img,
+  body.printing-cards #print-area.size-xs .badge-qr canvas {
+    width: 22px !important;
+    height: 22px !important;
   }
 
   .student-id-badge {
