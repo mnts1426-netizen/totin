@@ -1516,9 +1516,12 @@ window.views = {
                             <i class="fa-solid fa-id-card ml-1.5 text-[#D4A359]"></i> طباعة بطاقات الطلاب (باركود)
                         </button>
                         <label class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center cursor-pointer">
-                            <i class="fa-solid fa-file-excel ml-1"></i> استيراد من Excel / CSV
-                            <input type="file" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleStudentExcelImport(event)">
+                            <i class="fa-solid fa-file-excel ml-1"></i> استيراد Excel / CSV
+                            <input type="file" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleStudentExcelImport(event)">
                         </label>
+                        <button onclick="downloadImportTemplate('student')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center" title="تنزيل قالب الاستيراد">
+                            <i class="fa-solid fa-download ml-1"></i> قالب
+                        </button>
                         <button onclick="views.openAddStudentModal()" class="px-3 py-1.5 bg-[#169BA2] hover:bg-[#128086] text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center">
                             <i class="fa-solid fa-user-plus ml-1"></i> إضافة طالب
                         </button>
@@ -1637,12 +1640,30 @@ window.views = {
     closeModal("student-cards-modal");
     document.body.classList.remove("printing-cards");
 
-    const perPage = this._cardsPerPage || 9; // الافتراضي 9 بطاقات في الصفحة
+    // تخطيط كل عدد بطاقات في الورقة: أعمدة + حجم البطاقة (يُطبق في الطباعة)
+    const LAYOUTS = {
+      2: { cols: 1, size: "xl" },
+      4: { cols: 2, size: "lg" },
+      6: { cols: 2, size: "md" },
+      8: { cols: 2, size: "sm" },
+      9: { cols: 3, size: "md" },
+      10: { cols: 2, size: "sm" },
+      12: { cols: 3, size: "sm" },
+      16: { cols: 4, size: "sm" },
+      20: { cols: 4, size: "xs" },
+      24: { cols: 4, size: "xs" },
+    };
+    const perPage = LAYOUTS[this._cardsPerPage] ? this._cardsPerPage : 10;
     const progFilter = this._cardsProg || "all";
     const codeType = this._cardsCode || "barcode"; // barcode | qr | both
     this._cardsPerPage = perPage;
     this._cardsProg = progFilter;
     this._cardsCode = codeType;
+
+    const layout = LAYOUTS[perPage];
+    const cols = layout.cols;
+    const sizeCls = "size-" + layout.size;
+    const compact = layout.size === "sm" || layout.size === "xs";
 
     const activePrograms = getActivePrograms();
     let students = db.users.filter(
@@ -1652,10 +1673,6 @@ window.views = {
       students = students.filter((u) => u.currentProgramId === progFilter);
     }
     students.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
-
-    const colsFor = { 2: 2, 4: 2, 9: 3, 12: 3 };
-    const cols = colsFor[perPage] || 3;
-    const compact = perPage >= 9;
 
     const modalHtml = `
             <div id="student-cards-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex justify-center items-start pt-8 px-4 overflow-y-auto">
@@ -1679,10 +1696,12 @@ window.views = {
                                   .join("")}
                             </select>
                             <select onchange="views._cardsPerPage=parseInt(this.value); views.openStudentCardsModal();" class="bg-white/10 border border-white/20 text-white text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none">
-                                <option value="9" ${perPage === 9 ? "selected" : ""}>9 في الورقة</option>
-                                <option value="12" ${perPage === 12 ? "selected" : ""}>12 في الورقة</option>
-                                <option value="4" ${perPage === 4 ? "selected" : ""}>4 في الورقة</option>
-                                <option value="2" ${perPage === 2 ? "selected" : ""}>2 في الورقة</option>
+                                ${[2, 4, 6, 8, 9, 10, 12, 16, 20, 24]
+                                  .map(
+                                    (n) =>
+                                      `<option value="${n}" ${perPage === n ? "selected" : ""}>${n} في الورقة</option>`,
+                                  )
+                                  .join("")}
                             </select>
                             <select onchange="views._cardsCode=this.value; views.openStudentCardsModal();" class="bg-white/10 border border-white/20 text-white text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none">
                                 <option value="barcode" ${codeType === "barcode" ? "selected" : ""}>باركود (USB)</option>
@@ -1702,7 +1721,7 @@ window.views = {
                         ${
                           students.length === 0
                             ? '<div class="text-center py-10 text-slate-400 text-sm">لا يوجد طلاب مطابقون</div>'
-                            : `<div id="print-area" class="cards-grid cards-cols-${cols} code-${codeType}">
+                            : `<div id="print-area" class="cards-grid cards-cols-${cols} code-${codeType} ${sizeCls}">
                                 ${students.map((st) => views.buildStudentBadgeHtml(st, compact)).join("")}
                                </div>`
                         }
@@ -2124,8 +2143,11 @@ window.views = {
                         <div class="flex items-center space-x-2 space-x-reverse flex-wrap gap-y-2">
                             <label class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center cursor-pointer">
                                 <i class="fa-solid fa-file-excel ml-1"></i> استيراد مشرفين Excel / CSV
-                                <input type="file" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleSupervisorExcelImport(event)">
+                                <input type="file" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleSupervisorExcelImport(event)">
                             </label>
+                            <button onclick="downloadImportTemplate('supervisor')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center" title="تنزيل قالب">
+                                <i class="fa-solid fa-download ml-1"></i> قالب
+                            </button>
                             <button onclick="views.openAddSupervisorModal()" class="px-3 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center">
                                 <i class="fa-solid fa-user-plus ml-1 text-[#D4A359]"></i> إضافة مشرف
                             </button>
@@ -2625,8 +2647,121 @@ window.views = {
                         </button>
                     </div>
                 </div>
+
+                ${isAdmin ? this.renderBackupSection() : ""}
             </div>
         `;
+  },
+
+  // قسم النسخ الاحتياطي والاستعادة (المدير فقط)
+  renderBackupSection() {
+    const baks = window.store.listBackups ? window.store.listBackups() : [];
+    const usersNow = (db.users || []).filter((u) => u.role === "student").length;
+    return `
+      <div class="max-w-xl mt-6 pt-5 border-t border-slate-200 space-y-3 text-xs">
+        <h3 class="text-sm font-black text-[#0B2533]"><i class="fa-solid fa-shield-halved text-[#9E1B48] ml-1.5"></i> النسخ الاحتياطي والاستعادة</h3>
+        <p class="text-[11px] text-slate-500">عدد الطلاب الحاليّ: <b>${usersNow}</b>. احتفظ بنسخة Excel دورياً كأمان إضافي.</p>
+
+        <div class="flex flex-wrap gap-2">
+          <button onclick="views.doExport()" class="px-3 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl">
+            <i class="fa-solid fa-download ml-1"></i> تنزيل نسخة كاملة (JSON)
+          </button>
+          <label class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl cursor-pointer flex items-center">
+            <i class="fa-solid fa-upload ml-1"></i> استيراد نسخة (دمج)
+            <input type="file" accept=".json" class="hidden" onchange="views.doImport(event,'merge')">
+          </label>
+          <button onclick="views.forceUpload()" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl" title="ارفع بيانات هذا الجهاز إلى السحابة">
+            <i class="fa-solid fa-cloud-arrow-up ml-1"></i> رفع بيانات هذا الجهاز للسحابة
+          </button>
+        </div>
+
+        <div>
+          <div class="font-bold text-slate-600 mb-1.5">نسخ احتياطية محفوظة على هذا الجهاز (${baks.length}):</div>
+          ${
+            baks.length === 0
+              ? '<div class="text-slate-400">لا توجد بعد</div>'
+              : baks
+                  .slice()
+                  .reverse()
+                  .map(
+                    (b) => `
+              <div class="flex justify-between items-center py-1.5 border-b border-slate-100 last:border-0">
+                <span class="text-slate-700">${escHtml(b.date)} — <b>${b.users}</b> مستخدم</span>
+                <button onclick="views.doRestore(${b.index})" class="px-2.5 py-1 bg-slate-100 hover:bg-[#9E1B48] hover:text-white text-slate-700 rounded-lg font-bold">استعادة</button>
+              </div>`,
+                  )
+                  .join("")
+          }
+        </div>
+      </div>
+    `;
+  },
+
+  doExport() {
+    try {
+      const txt = window.store.exportJSON();
+      const blob = new Blob([txt], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `نسخة_المنصة_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      logAudit("تنزيل نسخة احتياطية", "");
+    } catch (e) {
+      alert("تعذّر التصدير.");
+    }
+  },
+
+  doImport(event, mode) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = "";
+    if (
+      !confirm(
+        "استيراد النسخة ودمجها مع البيانات الحالية ورفعها للسحابة؟ (لن يُحذف شيء)",
+      )
+    )
+      return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const res = window.store.importJSON(String(e.target.result || ""), mode);
+      if (res.ok) {
+        logAudit("استيراد نسخة احتياطية", `المستخدمون: ${res.users}`);
+        alert(`تم الاستيراد. إجمالي المستخدمين الآن: ${res.users}`);
+        navigateTo("settings");
+      } else {
+        alert("فشل الاستيراد: " + (res.error || "ملف غير صالح"));
+      }
+    };
+    reader.readAsText(file, "UTF-8");
+  },
+
+  doRestore(index) {
+    if (
+      !confirm(
+        "استعادة هذه النسخة ورفعها للسحابة؟ ستحل محل البيانات الحالية (تُحفظ نسخة احتياطية جديدة تلقائياً).",
+      )
+    )
+      return;
+    if (window.store.restoreBackup(index)) {
+      logAudit("استعادة نسخة احتياطية", "");
+      alert("تمت الاستعادة.");
+      navigateTo("settings");
+    } else {
+      alert("تعذّرت الاستعادة.");
+    }
+  },
+
+  forceUpload() {
+    const n = (db.users || []).length;
+    if (
+      !confirm(
+        `رفع بيانات هذا الجهاز (${n} مستخدم) إلى السحابة؟ استخدم هذا إذا كانت بيانات هذا الجهاز هي الأحدث/الأكمل.`,
+      )
+    )
+      return;
+    window.store.forcePushAll();
+    logAudit("رفع يدوي للسحابة", `${n} مستخدم`);
+    alert("تم الرفع للسحابة.");
   },
 
   // شاشة "مراجعة يوم محدد" للمدير: كل ما جرى في يوم معيّن (جدول + مهام + تحضير)
