@@ -2796,9 +2796,19 @@ window.views = {
     const dayTasks = (db.tasks || []).filter(
       (t) => (t.date === dateISO || t.dayOfWeek === weekday) && activeIds.includes(t.programId),
     );
-    const dayAttendance = (db.attendanceRecords || []).filter(
+
+    // يوم قديم؟ نحمّل أرشيفه تلقائياً ثم نُعيد الرسم
+    const monthKey = dateISO.slice(0, 7);
+    const isOldDay = dateISO < liveAttendanceCutoff();
+    if (isOldDay && !window.__attArchLoaded[monthKey]) {
+      ensureAttendanceArchive(dateISO, dateISO, () => {
+        if (state.currentView === "day-review") navigateTo("day-review");
+      });
+    }
+    const dayAttendance = (isOldDay ? getAttendanceRecords() : db.attendanceRecords || []).filter(
       (r) => (r.date || "") === dateISO,
     );
+    const archiveLoading = isOldDay && !window.__attArchLoaded[monthKey];
 
     const statusColor = (s) =>
       s === "حاضر"
@@ -2913,7 +2923,9 @@ window.views = {
             </div>
 
             <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5 space-y-2.5">
-                <h3 class="font-black text-[#0B2533] text-sm"><i class="fa-solid fa-clipboard-user text-[#D4A359] ml-1.5"></i> تحضير الطلاب في هذا اليوم</h3>
+                <h3 class="font-black text-[#0B2533] text-sm"><i class="fa-solid fa-clipboard-user text-[#D4A359] ml-1.5"></i> تحضير الطلاب في هذا اليوم
+                  ${archiveLoading ? '<span class="text-[10px] text-slate-400 font-medium"><i class="fa-solid fa-circle-notch fa-spin"></i> جارٍ تحميل الأرشيف...</span>' : ""}
+                </h3>
                 ${attendanceBlock || '<div class="text-slate-400 text-xs">لا توجد جلسات تحضير في هذا اليوم</div>'}
             </div>
         </div>
@@ -3464,9 +3476,31 @@ window.views = {
     const app = getAppSettings();
     const t = app.currentTerm || {};
     const terms = app.terms || [];
+    const liveAtt = (db.attendanceRecords || []).length;
+    const cutoff =
+      typeof liveAttendanceCutoff === "function"
+        ? liveAttendanceCutoff()
+        : "2000-01-01";
+    const oldAtt = (db.attendanceRecords || []).filter(
+      (r) => (r.date || "") < cutoff,
+    ).length;
+    const attWarn = liveAtt > 3500;
+
     return `
       <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-4 border-t-4 border-t-[#9E1B48]">
         <h2 class="text-lg sm:text-xl font-extrabold text-[#0B2533] border-b border-slate-100 pb-3"><i class="fa-solid fa-graduation-cap text-[#9E1B48] ml-2"></i> الفصل الدراسي</h2>
+
+        <div class="rounded-2xl border ${attWarn ? "border-amber-300 bg-amber-50/60" : "border-slate-200 bg-slate-50"} p-4 space-y-2 text-xs">
+          <div class="font-black text-[#0B2533]"><i class="fa-solid fa-box-archive text-[#9E1B48] ml-1"></i> أرشفة سجلات التحضير</div>
+          <p class="text-[11px] text-slate-600">
+            سجلات التحضير الحيّة: <b>${liveAtt}</b>${oldAtt > 0 ? ` — منها <b>${oldAtt}</b> أقدم من ${cutoff} يمكن أرشفتها` : ""}.
+            ${attWarn ? '<span class="text-amber-800 font-bold block mt-1">⚠️ العدد كبير — يُنصح بالأرشفة أو بدء فصل جديد.</span>' : ""}
+          </p>
+          <p class="text-[10px] text-slate-500">الأرشفة تنقل السجلات القديمة إلى تخزين منفصل (تبقى محفوظة بالكامل وتظهر عند مراجعة تلك الأيام)، وتُبقي قاعدة البيانات سريعة.</p>
+          <button onclick="archiveAttendanceNow()" class="px-4 py-1.5 ${oldAtt > 0 ? "bg-[#9E1B48] hover:bg-[#7d1439]" : "bg-slate-300 cursor-not-allowed"} text-white font-bold rounded-xl" ${oldAtt > 0 ? "" : "disabled"}>
+            أرشفة السجلات القديمة الآن
+          </button>
+        </div>
 
         <div class="bg-slate-50 rounded-2xl border border-slate-200 p-4 space-y-3 text-xs">
           <div class="font-black text-[#0B2533]">الفصل الحالي</div>
@@ -3646,6 +3680,16 @@ window.views = {
     const prog = db.programs.find((p) => p.id === u.currentProgramId) || {};
     const app = getAppSettings();
     const termName = (app.currentTerm && app.currentTerm.name) || "";
+
+    // إذا كانت بداية الفصل قبل الفترة الحيّة، نحمّل الأرشيف لإكمال الإحصاء
+    if (
+      typeof liveAttendanceCutoff === "function" &&
+      termStartDate() < liveAttendanceCutoff()
+    ) {
+      ensureAttendanceArchive(termStartDate(), todayStr(), () => {
+        if (state.currentView === "my-report") navigateTo("my-report");
+      });
+    }
 
     const all = studentAttendanceStats(u.id);
     const now = new Date();
