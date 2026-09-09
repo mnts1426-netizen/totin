@@ -402,6 +402,108 @@ window.store = (function () {
       return firstSnapshotHandled;
     },
 
+    // ---- الأرشفة: نقل السجلات القديمة إلى وثائق أرشيف منفصلة ----
+    // تبقى الوثيقة الحيّة صغيرة دائماً. آمن: كل نقل معاملة ذرية، ولا يُحذف من الحيّ
+    // إلا ما تأكّد وصوله للأرشيف.
+    archiveOld(collectionName, isOld, keyFn) {
+      return new Promise((resolve) => {
+        if (!fs || !firstSnapshotHandled) return resolve({ moved: 0 });
+        const all = Array.isArray(window.db[collectionName])
+          ? window.db[collectionName]
+          : [];
+        const oldItems = all.filter((x) => {
+          try {
+            return isOld(x);
+          } catch (e) {
+            return false;
+          }
+        });
+        if (oldItems.length === 0) return resolve({ moved: 0 });
+
+        const groups = {};
+        oldItems.forEach((it) => {
+          let k;
+          try {
+            k = String(keyFn(it) || "old");
+          } catch (e) {
+            k = "old";
+          }
+          (groups[k] = groups[k] || []).push(it);
+        });
+
+        const keys = Object.keys(groups);
+        const archivedIds = new Set();
+        let moved = 0;
+
+        const step = (i) => {
+          if (i >= keys.length) {
+            if (archivedIds.size) {
+              window.db[collectionName] = all.filter(
+                (x) => !archivedIds.has(itemKey(x)),
+              );
+              saveLocal();
+              pushCollection(collectionName, { force: true });
+            }
+            return resolve({ moved });
+          }
+          const k = keys[i];
+          const ref = fs
+            .collection("totin_archive")
+            .doc(collectionName + "__" + k);
+          const items = groups[k];
+
+          fs.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            const existing =
+              snap.exists && Array.isArray(snap.data().items)
+                ? snap.data().items
+                : [];
+            const map = new Map();
+            existing.forEach((x) => {
+              const kk = itemKey(x);
+              if (kk) map.set(kk, x);
+            });
+            items.forEach((x) => {
+              const kk = itemKey(x);
+              if (kk) map.set(kk, x);
+            });
+            tx.set(ref, {
+              items: Array.from(map.values()),
+              collection: collectionName,
+              key: k,
+              archivedAt: Date.now(),
+            });
+          })
+            .then(() => {
+              items.forEach((x) => archivedIds.add(itemKey(x)));
+              moved += items.length;
+              step(i + 1);
+            })
+            .catch((e) => {
+              console.warn("تعذّرت أرشفة (" + k + "):", e && e.code);
+              step(i + 1);
+            });
+        };
+        step(0);
+      });
+    },
+
+    // تحميل وثيقة أرشيف واحدة (للاطّلاع على بيانات قديمة عند الحاجة)
+    loadArchive(collectionName, key) {
+      return new Promise((resolve) => {
+        if (!fs) return resolve([]);
+        fs.collection("totin_archive")
+          .doc(collectionName + "__" + key)
+          .get()
+          .then((d) =>
+            resolve(
+              d.exists && Array.isArray(d.data().items) ? d.data().items : [],
+            ),
+          )
+          .catch(() => resolve([]));
+      });
+    },
+
     // ---- أدوات النسخ الاحتياطي والاستعادة ----
     exportJSON() {
       return JSON.stringify(
