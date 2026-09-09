@@ -739,47 +739,134 @@ function navigateTo(viewName) {
 }
 
 // 6. استيراد الطلاب والمشرفين عبر Excel / CSV
+// ===== استيراد Excel / CSV =====
+
+// قراءة ملف Excel(xlsx/xls) أو CSV وإرجاع صفوف ككائنات { [الحقل]: القيمة }
+function parseImportFile(file, cb) {
+  const name = (file.name || "").toLowerCase();
+  const reader = new FileReader();
+
+  const finish = (rows) => {
+    try {
+      cb(rows || []);
+    } catch (e) {
+      console.error(e);
+      alert("حدث خطأ أثناء معالجة الملف.");
+    }
+  };
+
+  const parseCsv = (text) => {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+    if (!lines.length) return [];
+    const split = (l) => l.split(/[,;\t]/).map((c) => c.trim().replace(/^"|"$/g, ""));
+    const header = split(lines[0]);
+    return lines.slice(1).map((l) => {
+      const cells = split(l);
+      const o = {};
+      header.forEach((h, i) => (o[h] = cells[i] || ""));
+      return o;
+    });
+  };
+
+  if (
+    typeof XLSX !== "undefined" &&
+    (name.endsWith(".xlsx") || name.endsWith(".xls"))
+  ) {
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        finish(XLSX.utils.sheet_to_json(ws, { defval: "", raw: false }));
+      } catch (err) {
+        console.error(err);
+        alert("تعذّر قراءة ملف Excel. جرّب حفظه بصيغة CSV.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    reader.onload = (e) => finish(parseCsv(String(e.target.result || "")));
+    reader.readAsText(file, "UTF-8");
+  }
+}
+
+// إيجاد قيمة عمود من عدة تسميات محتملة
+function pickCol(row, names) {
+  const keys = Object.keys(row);
+  for (const want of names) {
+    const k = keys.find(
+      (key) => key && key.replace(/\s+/g, "").includes(want.replace(/\s+/g, "")),
+    );
+    if (k && String(row[k]).trim() !== "") return String(row[k]).trim();
+  }
+  return "";
+}
+
 function handleStudentExcelImport(event) {
   const file = event.target.files[0];
   if (!file) return;
+  event.target.value = "";
 
-  const reader = new FileReader();
-  reader.onload = function (e) {
-    const text = e.target.result;
-    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-    let count = 0;
-    let skipped = 0;
-    const skippedNames = [];
-
-    // الأعمدة المتوقعة: الاسم، رقم الجوال، رقم الهوية، جوال ولي الأمر
+  parseImportFile(file, (rows) => {
     const defaultProg = getActivePrograms()[0] || db.programs[0];
+    let added = 0,
+      updated = 0,
+      skipped = 0;
+    const problems = [];
 
-    lines.forEach((line, idx) => {
-      if (idx === 0 && (line.includes("اسم") || line.includes("الاسم"))) return;
-      const parts = line.split(",").map((p) => p.trim());
-      if (parts.length < 2 || !parts[0]) return;
+    rows.forEach((row, i) => {
+      const name = cleanText(
+        pickCol(row, ["الاسم", "اسم", "الطالب", "name"]),
+        80,
+      );
+      const phone = normalizeDigits(
+        pickCol(row, ["الجوال", "جوال", "الهاتف", "الجوّال", "phone", "رقمالجوال"]),
+      );
+      const nationalId = normalizeDigits(
+        pickCol(row, ["الهوية", "هوية", "السجل", "id", "رقمالهوية"]),
+      );
+      const fatherPhone = normalizeDigits(
+        pickCol(row, ["ولي", "الأب", "ولي الأمر", "جوال الأب", "father"]),
+      );
 
-      const name = cleanText(parts[0], 80);
-      if (!name) return;
-      const phone = normalizeDigits(parts[1]);
-      const nationalId = normalizeDigits(parts[2] || "");
-      const fatherPhone = normalizeDigits(parts[3] || parts[1]);
-
-      // منع تكرار رقم الجوال أو رقم الهوية نهائياً
-      if (!phone || isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
+      if (!name && !phone) return; // صف فارغ
+      if (!name || !phone) {
         skipped++;
-        skippedNames.push(name);
+        problems.push(`صف ${i + 2}: نقص الاسم أو الجوال`);
         return;
       }
 
-      const newStudent = {
+      // مطابقة موجود بالجوال أو الهوية => تحديث بدل التخطي (يجعل إعادة الاستيراد آمنة)
+      const existing = db.users.find(
+        (u) =>
+          u.role === "student" &&
+          (normalizeDigits(u.phone) === phone ||
+            (nationalId && normalizeDigits(u.nationalId) === nationalId)),
+      );
+
+      if (existing) {
+        existing.name = name;
+        existing.avatar = name.substring(0, 2);
+        if (nationalId) existing.nationalId = nationalId;
+        if (fatherPhone) existing.fatherPhone = fatherPhone;
+        updated++;
+        return;
+      }
+
+      // تعارض الجوال/الهوية مع حساب من دور آخر
+      if (isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
+        skipped++;
+        problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
+        return;
+      }
+
+      db.users.push({
         id: makeId("student"),
         name: name,
         role: "student",
         studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
         phone: phone,
         nationalId: nationalId,
-        fatherPhone: fatherPhone,
+        fatherPhone: fatherPhone || phone,
         password: "1234",
         email: `${phone}@totin.sa`,
         avatar: name.substring(0, 2),
@@ -791,56 +878,77 @@ function handleStudentExcelImport(event) {
         progress: 0,
         isRestricted: false,
         createdAt: Date.now(),
-      };
-
-      db.users.push(newStudent);
-      count++;
+      });
+      added++;
     });
 
-    persist("users");
-    let msg = `تم استيراد وإضافة (${count}) طالب بنجاح.`;
-    if (skipped > 0) {
-      msg += `\nتم تجاهل (${skipped}) صف بسبب تكرار رقم الجوال/الهوية أو نقص البيانات: ${skippedNames.join("، ")}`;
+    if (added || updated) {
+      persist("users");
+      logAudit(
+        "استيراد طلاب",
+        `جديد: ${added} | محدّث: ${updated} | متجاهل: ${skipped}`,
+      );
     }
+    let msg = `اكتمل الاستيراد:\n• طلاب جدد: ${added}\n• حسابات محدّثة: ${updated}\n• متجاهَل: ${skipped}`;
+    if (problems.length)
+      msg += `\n\nملاحظات:\n${problems.slice(0, 15).join("\n")}`;
     alert(msg);
     navigateTo("students");
-  };
-  reader.readAsText(file);
+  });
 }
 
 function handleSupervisorExcelImport(event) {
   const file = event.target.files[0];
   if (!file) return;
+  event.target.value = "";
 
-  const reader = new FileReader();
-  reader.onload = function (e) {
-    const text = e.target.result;
-    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-    let count = 0;
-    let skipped = 0;
-    const skippedNames = [];
-
+  parseImportFile(file, (rows) => {
     const colors = ["#169BA2", "#E59824", "#8AA838", "#9E1B48", "#2B1736"];
     const defaultProg = getActivePrograms()[0] || db.programs[0];
+    let added = 0,
+      updated = 0,
+      skipped = 0;
+    const problems = [];
 
-    // الأعمدة المتوقعة: الاسم، رقم الجوال، رقم الهوية
-    lines.forEach((line, idx) => {
-      if (idx === 0 && (line.includes("اسم") || line.includes("الاسم"))) return;
-      const parts = line.split(",").map((p) => p.trim());
-      if (parts.length < 2 || !parts[0]) return;
+    rows.forEach((row, i) => {
+      const name = cleanText(
+        pickCol(row, ["الاسم", "اسم", "المشرف", "name"]),
+        80,
+      );
+      const phone = normalizeDigits(
+        pickCol(row, ["الجوال", "جوال", "الهاتف", "phone"]),
+      );
+      const nationalId = normalizeDigits(
+        pickCol(row, ["الهوية", "هوية", "id"]),
+      );
 
-      const name = cleanText(parts[0], 80);
-      if (!name) return;
-      const phone = normalizeDigits(parts[1]);
-      const nationalId = normalizeDigits(parts[2] || "");
-
-      if (!phone || isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
+      if (!name && !phone) return;
+      if (!name || !phone) {
         skipped++;
-        skippedNames.push(name);
+        problems.push(`صف ${i + 2}: نقص الاسم أو الجوال`);
         return;
       }
 
-      const newSupervisor = {
+      const existing = db.users.find(
+        (u) =>
+          u.role === "supervisor" &&
+          (normalizeDigits(u.phone) === phone ||
+            (nationalId && normalizeDigits(u.nationalId) === nationalId)),
+      );
+      if (existing) {
+        existing.name = name;
+        existing.avatar = name.substring(0, 2);
+        if (nationalId) existing.nationalId = nationalId;
+        updated++;
+        return;
+      }
+      if (isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
+        skipped++;
+        problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
+        return;
+      }
+
+      db.users.push({
         id: makeId("supervisor"),
         name: name,
         role: "supervisor",
@@ -850,26 +958,61 @@ function handleSupervisorExcelImport(event) {
         email: `${phone}@totin.sa`,
         avatar: name.substring(0, 2),
         color:
-          colors[db.users.filter((u) => u.role === "supervisor").length % colors.length],
+          colors[
+            db.users.filter((u) => u.role === "supervisor").length %
+              colors.length
+          ],
         assignedPrograms: [defaultProg.id],
         assignedGroups: [],
         isRestricted: false,
         createdAt: Date.now(),
-      };
-
-      db.users.push(newSupervisor);
-      count++;
+      });
+      added++;
     });
 
-    persist("users");
-    let msg = `تم استيراد وإضافة (${count}) مشرف بنجاح.`;
-    if (skipped > 0) {
-      msg += `\nتم تجاهل (${skipped}) صف بسبب تكرار رقم الجوال/الهوية أو نقص البيانات: ${skippedNames.join("، ")}`;
+    if (added || updated) {
+      persist("users");
+      logAudit("استيراد مشرفين", `جديد: ${added} | محدّث: ${updated}`);
     }
+    let msg = `اكتمل الاستيراد:\n• مشرفون جدد: ${added}\n• حسابات محدّثة: ${updated}\n• متجاهَل: ${skipped}`;
+    if (problems.length)
+      msg += `\n\nملاحظات:\n${problems.slice(0, 15).join("\n")}`;
     alert(msg);
     navigateTo("supervisors");
-  };
-  reader.readAsText(file);
+  });
+}
+
+// تنزيل قالب Excel للاستيراد
+function downloadImportTemplate(kind) {
+  const headers =
+    kind === "supervisor"
+      ? ["الاسم", "رقم الجوال", "رقم الهوية"]
+      : ["الاسم", "رقم الجوال", "رقم الهوية", "جوال ولي الأمر"];
+  const sample =
+    kind === "supervisor"
+      ? ["أحمد محمد", "0551234567", "1012345678"]
+      : ["عبدالله سعد", "0551234567", "1122334455", "0509876543"];
+  try {
+    if (typeof XLSX !== "undefined") {
+      const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "قالب");
+      XLSX.writeFile(
+        wb,
+        kind === "supervisor" ? "قالب_المشرفين.xlsx" : "قالب_الطلاب.xlsx",
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+  // احتياطي CSV
+  const csv = "﻿" + headers.join(",") + "\n" + sample.join(",");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = kind === "supervisor" ? "قالب_المشرفين.csv" : "قالب_الطلاب.csv";
+  a.click();
 }
 
 // 7. نظام التحضير المتعدد والغياب التلقائي نهاية اليوم
