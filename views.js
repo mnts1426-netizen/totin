@@ -1519,7 +1519,10 @@ window.views = {
                             <i class="fa-solid fa-file-excel ml-1"></i> استيراد Excel / CSV
                             <input type="file" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleStudentExcelImport(event)">
                         </label>
-                        <button onclick="downloadImportTemplate('student')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center" title="تنزيل قالب الاستيراد">
+                        <button onclick="exportStudentsExcel()" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center" title="تصدير الطلاب الحاليين لتعبئة الأرقام">
+                            <i class="fa-solid fa-file-export ml-1"></i> تصدير للتعبئة
+                        </button>
+                        <button onclick="downloadImportTemplate('student')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center" title="تنزيل قالب فارغ">
                             <i class="fa-solid fa-download ml-1"></i> قالب
                         </button>
                         <button onclick="views.openAddStudentModal()" class="px-3 py-1.5 bg-[#169BA2] hover:bg-[#128086] text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center">
