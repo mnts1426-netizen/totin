@@ -1277,11 +1277,31 @@ window.views = {
           ? availablePrograms[0].id
           : firstActiveProgramId();
 
+    // تاريخ التحضير: يختاره المشرف/المدير (الافتراضي اليوم، ولا يُسمح بتاريخ مستقبلي)
+    const todayISO = todayStr();
+    const selDate =
+      state.quickAttDate && state.quickAttDate <= todayISO
+        ? state.quickAttDate
+        : todayISO;
+    const selWeekday = new Date(selDate + "T00:00:00").getDay();
+    const dayNames = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+    const isPastDate = selDate < todayISO;
+
+    // جلسات هذا البرنامج فقط (لا نقفز أبداً لجلسة برنامج آخر) + جلسة "تحضير يومي" عامة
+    // متاحة دائماً للتحضير في أي يوم حتى بلا جلسة مجدولة
+    const progSchedules = (db.schedules || []).filter(
+      (s) => s.programId === currentProgId && s.requiresAttendance,
+    );
+    const adhocSchedule = getAdhocSchedule(currentProgId);
+    const sessionOptions = progSchedules.concat([adhocSchedule]);
+    // الافتراضي: جلسة مجدولة في نفس يوم الأسبوع للتاريخ المختار، وإلا "تحضير يومي"
+    const preferredSchedule =
+      progSchedules.find((s) => s.dayOfWeek === selWeekday) || adhocSchedule;
     const activeSchedule =
-      db.schedules.find(
-        (s) => s.programId === currentProgId && s.requiresAttendance,
-      ) || db.schedules[0];
-    const scheduleId = activeSchedule ? activeSchedule.id : "sch_ts_1";
+      (state.quickAttScheduleId &&
+        sessionOptions.find((s) => s.id === state.quickAttScheduleId)) ||
+      preferredSchedule;
+    const scheduleId = activeSchedule.id;
 
     const students = db.users.filter(
       (u) =>
@@ -1317,9 +1337,30 @@ window.views = {
                     </div>
 
                     <div class="flex items-center space-x-2 space-x-reverse flex-wrap gap-y-2">
-                        <select onchange="state.currentProgramId = this.value; navigateTo('quick-attendance');" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-[#0B2533] focus:border-[#D4A359]">
+                        <select onchange="state.currentProgramId = this.value; state.quickAttScheduleId = null; navigateTo('quick-attendance');" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-[#0B2533] focus:border-[#D4A359]">
                             ${availablePrograms.map((p) => `<option value="${p.id}" ${p.id === currentProgId ? "selected" : ""}>برنامج ${p.name}</option>`).join("")}
                         </select>
+                    </div>
+                </div>
+
+                <!-- اختيار يوم التحضير والجلسة: أي يوم يُرصد فيه تحضير يُعتبر يوم تحضير -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-amber-50/60 border border-amber-200 rounded-2xl p-3 text-xs">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1"><i class="fa-regular fa-calendar ml-1 text-[#D4A359]"></i> يوم التحضير:</label>
+                        <div class="flex items-center gap-1.5">
+                            <input type="date" id="quick-att-date" value="${selDate}" max="${todayISO}"
+                                   onchange="state.quickAttDate = this.value || null; state.quickAttScheduleId = null; navigateTo('quick-attendance');"
+                                   class="flex-1 bg-white border border-amber-300 rounded-xl px-2 py-1.5 font-bold text-[#0B2533]">
+                            ${isPastDate ? `<button onclick="state.quickAttDate = null; state.quickAttScheduleId = null; navigateTo('quick-attendance');" class="px-2.5 py-1.5 bg-white border border-amber-300 rounded-xl font-bold text-[#169BA2]">اليوم</button>` : ""}
+                        </div>
+                        <div class="text-[10px] mt-1 ${isPastDate ? "text-amber-800 font-bold" : "text-slate-500"}">${dayNames[selWeekday]} — ${selDate}${isPastDate ? " (تُسجِّل تحضير يوم سابق)" : ""}</div>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1"><i class="fa-solid fa-chalkboard-user ml-1 text-[#D4A359]"></i> الجلسة:</label>
+                        <select onchange="state.quickAttScheduleId = this.value; navigateTo('quick-attendance');" class="w-full bg-white border border-amber-300 rounded-xl px-2 py-1.5 font-bold text-[#0B2533]" title="اختر الجلسة التي تُحضِّر لها">
+                            ${sessionOptions.map((s) => `<option value="${s.id}" ${s.id === scheduleId ? "selected" : ""}>${escHtml(s.title)}${s.adhoc ? " (أي يوم)" : " — " + (dayNames[s.dayOfWeek] || "")}</option>`).join("")}
+                        </select>
+                        <div class="text-[10px] text-slate-500 mt-1">أي يوم تُحضِّر فيه ولو طالباً واحداً يُعتبر يوم تحضير، ويُحتسب البقية غائبين نهاية اليوم.</div>
                     </div>
                 </div>
 
@@ -1327,22 +1368,27 @@ window.views = {
                 <div class="bg-gradient-to-r from-slate-900 to-[#0B2533] rounded-2xl p-4 text-white shadow-sm border border-[#D4A359]/40 space-y-3">
                     <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                         <label class="font-black text-xs sm:text-sm text-[#D4A359] flex items-center">
-                            <i class="fa-solid fa-barcode ml-2 text-base"></i> مسح باركود بطاقة الطالب (يدعم أجهزة الـ USB وكاميرا الجوال):
+                            <i class="fa-solid fa-barcode ml-2 text-base"></i> تحضير بمسح البطاقة:
                         </label>
                         <span id="barcode-scan-feedback" class="text-[11px] font-bold text-emerald-400">جاهز لاستقبال مسح الأكواد...</span>
                     </div>
 
                     <div class="relative">
-                        <input id="barcode-quick-input" 
-                               autofocus 
+                        <input id="barcode-quick-input"
+                               autofocus
                                onkeydown="if(event.key === 'Enter') { views.processBarcodeScan(this.value, '${scheduleId}'); this.value = ''; }"
-                               placeholder="مرر كود بطاقة الطالب هنا أو اكتب الرقم الأكاديمي واضغط Enter..." 
+                               placeholder="اضغط هنا ثم مرّر بطاقة الطالب بجهاز USB، أو اكتب الرقم الأكاديمي واضغط Enter..."
                                class="w-full bg-white text-[#0B2533] font-black text-sm px-4 py-3 rounded-xl border-2 border-[#D4A359] focus:outline-none shadow-inner placeholder:font-normal placeholder:text-slate-400">
-                        <button onclick="const val = document.getElementById('barcode-quick-input').value; views.processBarcodeScan(val, '${scheduleId}'); document.getElementById('barcode-quick-input').value = '';" 
+                        <button onclick="const val = document.getElementById('barcode-quick-input').value; views.processBarcodeScan(val, '${scheduleId}'); document.getElementById('barcode-quick-input').value = '';"
                                 class="absolute left-2 top-2 bottom-2 px-4 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-lg text-xs transition">
                             تحضير
                         </button>
                     </div>
+
+                    <button onclick="views.openCameraScanModal('${scheduleId}')" class="w-full py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center">
+                        <i class="fa-solid fa-camera ml-2"></i> مسح بكاميرا الجوال (بدون جهاز خارجي)
+                    </button>
+                    <p class="text-[10px] text-slate-300">يحتاج مسح الكاميرا فتح الموقع عبر رابط آمن (https) وإذن الوصول للكاميرا من المتصفح.</p>
                 </div>
 
                 <!-- بطاقات إحصائيات الجلسة الحالية -->
@@ -1445,9 +1491,10 @@ window.views = {
         `;
   },
 
-  // معالجة مسح الباركود السريع
+  // معالجة مسح الباركود السريع (من جهاز USB أو من كاميرا الجوال)
+  // ملاحظة: بلا alert() حتى لا يتوقف تدفق المسح المتتالي لعدة طلاب
   processBarcodeScan(scannedCode, scheduleId) {
-    if (!scannedCode || scannedCode.trim() === "") return;
+    if (!scannedCode || scannedCode.trim() === "") return false;
     const code = scannedCode.trim();
 
     const student = db.users.find(
@@ -1459,19 +1506,118 @@ window.views = {
     const feedback = document.getElementById("barcode-scan-feedback");
     if (!student) {
       if (feedback) {
-        feedback.innerText = `لم يتم العثور على طالب بالكود: ${code} ❌`;
+        feedback.innerText = `⚠️ لم يتم العثور على طالب بالكود: ${escHtml(code)}`;
         feedback.className = "text-[11px] font-bold text-rose-400";
       }
-      alert(`لم يتم العثور على طالب يطابق الرقم: ${code}`);
-      return;
+      return false;
     }
 
     recordAttendance(scheduleId, student.id, "حاضر");
     if (feedback) {
-      feedback.innerText = `تم رصد حضور الطالب: ${student.name} بنجاح ✓`;
+      feedback.innerText = `✓ تم رصد حضور الطالب: ${escHtml(student.name)}`;
       feedback.className = "text-[11px] font-bold text-emerald-400";
     }
     navigateTo("quick-attendance");
+    return true;
+  },
+
+  // إعادة التركيز لحقل الإدخال بعد كل رسم لشاشة التحضير السريع حتى يستمر
+  // قارئ الباركود (USB) بالعمل دون الحاجة للضغط داخل الحقل يدوياً في كل مرة
+  focusBarcodeInput() {
+    const el = document.getElementById("barcode-quick-input");
+    if (el) el.focus();
+  },
+
+  // ===== مسح الباركود / QR بكاميرا الجوال =====
+  openCameraScanModal(scheduleId) {
+    closeModal("camera-scan-modal");
+    if (typeof Html5Qrcode === "undefined") {
+      alert(
+        "تعذّر تحميل مكتبة المسح بالكاميرا (تحقق من الاتصال بالإنترنت) وحاول مجدداً.",
+      );
+      return;
+    }
+    if (!window.isSecureContext) {
+      alert(
+        "مسح الكاميرا يعمل فقط عند فتح الموقع عبر رابط آمن (https) — الرجاء فتح رابط المنصة الرسمي وليس عنوان جهاز محلي.",
+      );
+      return;
+    }
+
+    const html = `
+      <div id="camera-scan-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex justify-center items-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-sm w-full overflow-hidden">
+          <div class="bg-[#0B2533] text-white px-4 py-3 flex justify-between items-center">
+            <h3 class="font-bold text-sm"><i class="fa-solid fa-camera text-[#D4A359] ml-1.5"></i> مسح بالكاميرا</h3>
+            <button onclick="views.closeCameraScanModal()" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="p-3">
+            <div id="camera-scan-reader" class="rounded-2xl overflow-hidden bg-black"></div>
+            <div id="camera-scan-feedback" class="text-center text-xs font-bold text-slate-500 mt-2">جارٍ تشغيل الكاميرا...</div>
+          </div>
+          <div class="px-4 pb-4">
+            <button onclick="views.closeCameraScanModal()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">إغلاق</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML("beforeend", html);
+
+    const feedback = document.getElementById("camera-scan-feedback");
+    this._camScanner = new Html5Qrcode("camera-scan-reader");
+    this._camScheduleId = scheduleId;
+    this._camLastCode = "";
+    this._camLastAt = 0;
+
+    this._camScanner
+      .start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => {
+          const now = Date.now();
+          // تجاهل تكرار نفس الكود خلال 3 ثوانٍ (الكاميرا تقرأ نفس البطاقة عدة مرات بالثانية)
+          if (decodedText === this._camLastCode && now - this._camLastAt < 3000) {
+            return;
+          }
+          this._camLastCode = decodedText;
+          this._camLastAt = now;
+          const ok = views.processBarcodeScan(decodedText, this._camScheduleId);
+          const fb = document.getElementById("camera-scan-feedback");
+          if (fb) {
+            fb.textContent = ok ? "✓ تم التحضير — وجّه الكاميرا للبطاقة التالية" : "⚠️ كود غير معروف";
+            fb.className =
+              "text-center text-xs font-bold mt-2 " +
+              (ok ? "text-emerald-600" : "text-rose-600");
+          }
+        },
+        () => {}, // تجاهل أخطاء عدم العثور على كود في كل إطار (طبيعي)
+      )
+      .catch((err) => {
+        if (feedback) {
+          feedback.textContent =
+            "تعذّر تشغيل الكاميرا. تأكد من منح إذن الكاميرا للموقع من إعدادات المتصفح.";
+          feedback.className = "text-center text-xs font-bold text-rose-600 mt-2";
+        }
+        console.warn("تعذّر تشغيل ماسح الكاميرا:", err);
+      });
+  },
+
+  closeCameraScanModal() {
+    const scanner = this._camScanner;
+    this._camScanner = null;
+    const finish = () => {
+      closeModal("camera-scan-modal");
+      this.focusBarcodeInput();
+    };
+    if (scanner && scanner.isScanning) {
+      scanner
+        .stop()
+        .then(() => scanner.clear())
+        .catch(() => {})
+        .finally(finish);
+    } else {
+      finish();
+    }
   },
 
   bulkRecordQuickAttendance(scheduleId, status) {
@@ -2020,6 +2166,124 @@ window.views = {
     });
   },
 
+  // نافذة مطابقة أعمدة الاستيراد: المستخدم يختار بنفسه أي عمود في ملفه يقابل كل حقل.
+  // لا حقل إلزامي عدا الاسم — أي حقل يُترك "بدون" يبقى فارغاً في السجل.
+  openImportMappingModal(kind, rows) {
+    closeModal("import-map-modal");
+    window.__importRows = rows;
+    window.__importKind = kind;
+
+    const headers = Object.keys(rows[0] || {});
+    const fields = kind === "supervisor" ? SUPERVISOR_IMPORT_FIELDS : STUDENT_IMPORT_FIELDS;
+    const activePrograms = getActivePrograms();
+    const defaultProgId =
+      (isProgramActive(state.currentProgramId) && state.currentProgramId) ||
+      (activePrograms[0] && activePrograms[0].id) ||
+      "";
+
+    const colOptions = (selected) =>
+      `<option value="">— بدون (يبقى فارغاً) —</option>` +
+      headers
+        .map(
+          (h) =>
+            `<option value="${escHtml(h)}" ${h === selected ? "selected" : ""}>${escHtml(h)}</option>`,
+        )
+        .join("");
+
+    const previewRows = rows.slice(0, 3);
+
+    const html = `
+      <div id="import-map-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex justify-center items-start pt-8 px-4 overflow-y-auto">
+        <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden my-6">
+          <div class="bg-[#0B2533] text-white px-5 py-4 flex justify-between items-center border-b border-[#D4A359]">
+            <h3 class="font-bold text-sm flex items-center">
+              <i class="fa-solid fa-table-columns text-[#D4A359] ml-1.5"></i> اختر أي عمود يقابل كل حقل
+            </h3>
+            <button onclick="closeModal('import-map-modal')" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div class="p-5 space-y-3 text-xs">
+            <p class="text-[11px] text-slate-500">وجدنا (${rows.length}) صفاً في الملف بأعمدة: ${headers.map((h) => `<b>${escHtml(h)}</b>`).join("، ")}. اختر تحت كل حقل أي عمود يقابله — اتركه "بدون" إن لم يوجد في ملفك.</p>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">البرنامج المستهدف:</label>
+              <select id="import-map-program" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700">
+                ${activePrograms.map((p) => `<option value="${p.id}" ${p.id === defaultProgId ? "selected" : ""}>${escHtml(p.name)}</option>`).join("")}
+              </select>
+            </div>
+
+            <div class="space-y-2.5 bg-slate-50 rounded-2xl border border-slate-200 p-3">
+              ${fields
+                .map((f) => {
+                  const guess = guessColumnKey(headers, f.guesses);
+                  return `
+                <div class="grid grid-cols-2 gap-2 items-center">
+                  <label class="font-bold text-slate-700">${escHtml(f.label)}${f.required ? ' <span class="text-rose-600">*</span>' : ' <span class="text-slate-400 font-normal">(اختياري)</span>'}</label>
+                  <select id="import-map-${f.key}" class="w-full bg-white border border-slate-200 rounded-xl p-2 font-bold text-slate-700">
+                    ${colOptions(guess)}
+                  </select>
+                </div>`;
+                })
+                .join("")}
+            </div>
+
+            <div>
+              <div class="font-bold text-slate-600 mb-1">معاينة أول ${previewRows.length} صفوف:</div>
+              <div class="overflow-x-auto rounded-xl border border-slate-200">
+                <table class="w-full text-[10px] text-right">
+                  <thead class="bg-slate-100"><tr>${headers.map((h) => `<th class="p-1.5 font-bold text-slate-600 whitespace-nowrap">${escHtml(h)}</th>`).join("")}</tr></thead>
+                  <tbody>
+                    ${previewRows
+                      .map(
+                        (r) =>
+                          `<tr class="border-t border-slate-100">${headers.map((h) => `<td class="p-1.5 text-slate-700 whitespace-nowrap">${escHtml(String(r[h] ?? ""))}</td>`).join("")}</tr>`,
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p class="text-[10px] text-slate-500">* الاسم وحده إلزامي. أي حقل آخر تتركه "بدون" يبقى فارغاً لكل الصفوف — لن يُرفض أي صف بسببه.</p>
+
+            <div class="pt-2 flex justify-end gap-2">
+              <button type="button" onclick="closeModal('import-map-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
+              <button type="button" onclick="views.confirmImportMapping()" class="px-4 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl">تأكيد الاستيراد</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML("beforeend", html);
+  },
+
+  confirmImportMapping() {
+    const kind = window.__importKind;
+    const rows = window.__importRows || [];
+    const fields = kind === "supervisor" ? SUPERVISOR_IMPORT_FIELDS : STUDENT_IMPORT_FIELDS;
+
+    const nameSel = document.getElementById("import-map-name");
+    if (nameSel && !nameSel.value) {
+      alert("يجب تحديد عمود الاسم على الأقل.");
+      return;
+    }
+
+    const mapping = {};
+    fields.forEach((f) => {
+      const el = document.getElementById("import-map-" + f.key);
+      mapping[f.key] = el ? el.value : "";
+    });
+    const programId = document.getElementById("import-map-program").value;
+
+    closeModal("import-map-modal");
+    if (kind === "supervisor") {
+      runSupervisorImport(rows, mapping, programId);
+    } else {
+      runStudentImport(rows, mapping, programId);
+    }
+    window.__importRows = null;
+  },
+
   // 15. إضافة طالب يدوياً
   openAddStudentModal() {
     const modalHtml = `
@@ -2434,7 +2698,7 @@ window.views = {
   // 17. مودال التحضير بالجداول التقليدي
   openAttendanceModal(scheduleId) {
     closeModal("attendance-modal");
-    const schedule = db.schedules.find((s) => s.id === scheduleId);
+    const schedule = getScheduleById(scheduleId);
     if (!schedule) return;
 
     const user = state.currentUser;
@@ -2584,7 +2848,7 @@ window.views = {
   },
 
   updateAttendanceModalView(scheduleId) {
-    const schedule = db.schedules.find((s) => s.id === scheduleId);
+    const schedule = getScheduleById(scheduleId);
     if (!schedule) return;
     const unmarkedCount = getUnmarkedAttendanceCount(
       scheduleId,
@@ -2704,10 +2968,10 @@ window.views = {
     try {
       const txt = window.store.exportJSON();
       const blob = new Blob([txt], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `نسخة_المنصة_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
+      downloadBlob(
+        blob,
+        `نسخة_المنصة_${new Date().toISOString().slice(0, 10)}.json`,
+      );
       logAudit("تنزيل نسخة احتياطية", "");
     } catch (e) {
       alert("تعذّر التصدير.");
@@ -2836,7 +3100,7 @@ window.views = {
     ];
 
     const attendanceBlock = attSchedIds
-      .map((sid) => (db.schedules || []).find((s) => s.id === sid))
+      .map((sid) => getScheduleById(sid))
       .filter(Boolean)
       .map((sch) => {
         const students = db.users.filter(
@@ -3321,7 +3585,24 @@ window.views = {
             <i class="fa-solid fa-plus ml-1 text-[#D4A359]"></i> إضافة جلسة
           </button>
         </div>
-        <p class="text-[11px] text-slate-500">هذه الجلسات هي التي تظهر في الجدول والتحضير ومراجعة اليوم. أضِف أيام الحلقة الفعلية.</p>
+        <div class="bg-amber-50/60 border border-amber-200 rounded-2xl p-3 space-y-2 text-xs">
+          <div class="font-black text-[#0B2533]"><i class="fa-solid fa-calendar-check text-[#D4A359] ml-1"></i> طريقة احتساب أيام التحضير</div>
+          <select onchange="setAttendanceMode(this.value)" class="w-full bg-white border border-amber-300 rounded-xl p-2 font-bold text-[#0B2533]">
+            <option value="taken" ${getAttendanceMode() === "taken" ? "selected" : ""}>أي يوم يُرصد فيه تحضير فقط (مُوصى به)</option>
+            <option value="scheduled" ${getAttendanceMode() === "scheduled" ? "selected" : ""}>أيام الجلسات المجدولة + أي يوم يُرصد فيه تحضير</option>
+          </select>
+          <p class="text-[10px] text-slate-600">
+            ${
+              getAttendanceMode() === "taken"
+                ? "اليوم يصبح يوم تحضير بمجرد أن يُحضِّر المشرف أو المدير ولو طالباً واحداً (في أي يوم يختاره)، ويُحتسب بقية الطلاب غائبين نهاية ذلك اليوم. الأيام التي لم يُرصد فيها شيء لا تُحتسب غياباً."
+                : "أيام الجلسات المجدولة تُحتسب أيام تحضير حتى لو لم يُرصد فيها أحد (يُغيَّب الجميع تلقائياً)، بالإضافة لأي يوم آخر يُرصد فيه تحضير."
+            }
+          </p>
+          <button onclick="cleanupAutoAbsences()" class="px-3 py-1.5 bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 font-bold rounded-xl">
+            <i class="fa-solid fa-broom ml-1"></i> حذف الغياب التلقائي من أيام لم يُرصد فيها أي تحضير
+          </button>
+        </div>
+        <p class="text-[11px] text-slate-500">الجلسات المجدولة تظهر في الجدول ومراجعة اليوم. ويمكن دائماً التحضير في أي يوم عبر «تحضير يومي» في شاشة التحضير السريع حتى بلا جلسة مجدولة.</p>
         <div class="space-y-2">
           ${
             schedules.length === 0

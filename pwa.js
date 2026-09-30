@@ -1,6 +1,6 @@
 /**
  * pwa.js - تثبيت التطبيق (PWA) وتفعيل الإشعارات بضغطة واحدة
- * بدون أي خدمة خارجية (لا OneSignal ولا FCM) - أكواد فقط.
+ * بدون أي خدمة خارجية (لا OneSignal) - Firebase والأكواد فقط.
  *
  * التدفق للمستخدم:
  *   يضغط زر واحد  ->  تظهر نافذة المتصفح "تثبيت التطبيق؟" (موافق/لا)
@@ -89,6 +89,14 @@ window.installAppAndEnableNotifications = async function () {
       } else {
         new Notification("المنصة الالكترونية", { body, icon: "logo15.png" });
       }
+      // ربط هذا الجهاز بإشعارات FCM حتى تصل الإشعارات والتطبيق مغلق
+      if (
+        window.pushReg &&
+        typeof state !== "undefined" &&
+        state.currentUser
+      ) {
+        await window.pushReg.register(state.currentUser);
+      }
       alert("✅ تم تفعيل الإشعارات بنجاح.");
     } else if (permission === "denied") {
       alert(
@@ -103,3 +111,36 @@ window.installAppAndEnableNotifications = async function () {
 
 // أسماء بديلة للتوافق
 window.triggerAppInstallAndNotify = window.installAppAndEnableNotifications;
+
+// عرض إشعار فوري فعلي (تنبيه نظام) - يُستخدم عند وصول إشعار جديد للمستخدم الحالي
+// أثناء فتح التطبيق (ولو في تبويب/خلفية). أما والتطبيق مغلق تماماً فيتولاها
+// FCM عبر push.js و functions/index.js (نفس الوسم tag فلا يتكرر الإشعار).
+window.showLocalNotification = async function (title, body, tag) {
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted") {
+      return false;
+    }
+    const opts = {
+      body: body || "",
+      icon: "logo15.png",
+      badge: "logo15.png",
+      dir: "rtl",
+      lang: "ar",
+      tag: tag || undefined,
+    };
+    const reg =
+      window.__swRegistration ||
+      (navigator.serviceWorker
+        ? await navigator.serviceWorker.ready.catch(() => null)
+        : null);
+    if (reg && reg.showNotification) {
+      await reg.showNotification(title || "المنصة الالكترونية", opts);
+    } else {
+      new Notification(title || "المنصة الالكترونية", opts);
+    }
+    return true;
+  } catch (e) {
+    console.warn("تعذر عرض الإشعار:", e);
+    return false;
+  }
+};

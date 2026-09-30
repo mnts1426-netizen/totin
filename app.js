@@ -20,11 +20,15 @@ const state = {
   lockedProgramId: null,
   // تاريخ العرض الحالي لشاشة "مراجعة يوم" الخاصة بالمدير (YYYY-MM-DD محلي)
   reviewDate: "",
+  // الجلسة المختارة يدوياً في التحضير السريع (لو للبرنامج أكثر من جلسة تحضير)
+  quickAttScheduleId: null,
+  // تاريخ التحضير المختار في التحضير السريع (YYYY-MM-DD) — فارغ = اليوم
+  quickAttDate: null,
 };
 
 // ===== أدوات مساعدة عامة =====
 
-// البرامج المفعّلة فقط (تأصيل ورسوخ مغلقان ولا يتم العمل عليهما)
+// البرامج المفعّلة فقط (أي برنامج بلا isClosed:true يُعتبر مفعّلاً)
 function getActivePrograms() {
   return (window.db.programs || []).filter((p) => !p.isClosed);
 }
@@ -125,6 +129,16 @@ window.escHtml = escHtml;
 window.cleanText = cleanText;
 
 function persist(...collections) {
+  // ختم وقت الإنشاء لكل إشعار جديد — الدالة السحابية ترسل للأجهزة الإشعارات الحديثة فقط
+  if (
+    collections.indexOf("notifications") > -1 &&
+    Array.isArray(window.db.notifications)
+  ) {
+    const now = Date.now();
+    window.db.notifications.forEach((n) => {
+      if (n && !n.ts) n.ts = now;
+    });
+  }
   // تقليم الإشعارات الأقدم لإبقاء الوثيقة صغيرة (الإشعارات مؤقتة بطبيعتها)
   if (
     collections.indexOf("notifications") > -1 &&
@@ -470,6 +484,11 @@ function initApp() {
         }
         state.currentUser = stillValid;
         updateNotificationsBadge();
+        try {
+          checkNewNotifications();
+        } catch (e) {
+          console.warn(e);
+        }
       }
       // لا نُعيد رسم الشاشة إذا كان المستخدم في منتصف إدخال/نافذة مفتوحة حتى لا نفقد ما يكتبه
       if (!isUserBusyEditing()) {
@@ -542,8 +561,20 @@ function restoreSession() {
 
   showAppControls(user);
   updateNotificationsBadge();
+  window.__seenNotifInit = false;
+  checkNewNotifications();
+  registerPushDevice(user);
   navigateTo("home");
   return true;
+}
+
+// ربط هذا الجهاز بإشعارات FCM للمستخدم (بصمت — لا شيء يحدث إن لم يُمنح إذن الإشعارات بعد)
+function registerPushDevice(user) {
+  try {
+    if (window.pushReg && user) window.pushReg.register(user);
+  } catch (e) {
+    console.warn(e);
+  }
 }
 
 if (document.readyState === "loading") {
@@ -677,6 +708,9 @@ function handleLoginSubmit(programId) {
   closeModal("login-modal");
   showAppControls(user);
   updateNotificationsBadge();
+  window.__seenNotifInit = false;
+  checkNewNotifications();
+  registerPushDevice(user);
   saveSession();
   try {
     logAudit("تسجيل دخول", `دخول ${user.role} إلى المنصة`);
@@ -685,9 +719,15 @@ function handleLoginSubmit(programId) {
 }
 
 function logoutUser() {
+  // فك ربط الجهاز حتى لا تصله إشعارات المستخدم الذي خرج
+  try {
+    if (window.pushReg) window.pushReg.unregister();
+  } catch (e) {}
   clearSession();
   state.currentUser = null;
   state.currentRole = null;
+  window.__seenNotifInit = false;
+  window.__seenNotifIds = new Set();
   hideAppControls();
   navigateTo("portal");
 }
@@ -734,6 +774,11 @@ function toggleScheduleViewMode(mode) {
 
 // 5. محرك التنقل بين الشاشات
 function navigateTo(viewName) {
+  // تاريخ/جلسة التحضير السريع المختاران يُنسيان عند مغادرة الشاشة (لا يبقى تاريخ قديم عالقاً)
+  if (viewName !== "quick-attendance") {
+    state.quickAttDate = null;
+    state.quickAttScheduleId = null;
+  }
   state.currentView = viewName;
 
   const sidebar = document.getElementById("main-sidebar");
@@ -771,6 +816,11 @@ function navigateTo(viewName) {
         contentArea.innerHTML = window.views.renderQuickAttendanceView
           ? window.views.renderQuickAttendanceView()
           : window.views.renderHome(state.currentUser);
+        // إبقاء التركيز على حقل المسح ليستمر قارئ الباركود (USB) في العمل
+        // دون الحاجة للضغط داخل الحقل بعد كل عملية تحضير
+        if (window.views.focusBarcodeInput) {
+          setTimeout(() => window.views.focusBarcodeInput(), 0);
+        }
         break;
       case "schedule":
         contentArea.innerHTML = window.views.renderScheduleWidget(
@@ -913,7 +963,7 @@ function parseImportFile(file, cb) {
   }
 }
 
-// إيجاد قيمة عمود من عدة تسميات محتملة
+// إيجاد قيمة عمود من عدة تسميات محتملة (للتخمين التلقائي الأولي فقط)
 function pickCol(row, names) {
   const keys = Object.keys(row);
   for (const want of names) {
@@ -925,127 +975,43 @@ function pickCol(row, names) {
   return "";
 }
 
+// تخمين اسم عمود الملف (المفتاح نفسه، وليس قيمته) الأقرب لأحد الأسماء المحتملة —
+// يُستخدم فقط لتعبئة مربع الاختيار مبدئياً؛ القرار النهائي بيد المستخدم في نافذة المطابقة
+function guessColumnKey(headers, names) {
+  for (const want of names) {
+    const k = headers.find(
+      (h) => h && h.replace(/\s+/g, "").includes(want.replace(/\s+/g, "")),
+    );
+    if (k) return k;
+  }
+  return "";
+}
+
+// الحقول المطلوب تعيينها للطلاب والمشرفين + الأسماء المحتملة للتخمين المبدئي
+const STUDENT_IMPORT_FIELDS = [
+  { key: "name", label: "الاسم", required: true, guesses: ["الاسم", "اسم", "الطالب", "name"] },
+  { key: "phone", label: "رقم الجوال", required: false, guesses: ["الجوال", "جوال", "الهاتف", "الجوّال", "phone", "رقمالجوال"] },
+  { key: "nationalId", label: "رقم الهوية", required: false, guesses: ["الهوية", "هوية", "السجل", "id", "رقمالهوية"] },
+  { key: "fatherPhone", label: "جوال ولي الأمر", required: false, guesses: ["ولي", "الأب", "ولي الأمر", "جوال الأب", "father"] },
+];
+const SUPERVISOR_IMPORT_FIELDS = [
+  { key: "name", label: "الاسم", required: true, guesses: ["الاسم", "اسم", "المشرف", "name"] },
+  { key: "phone", label: "رقم الجوال", required: false, guesses: ["الجوال", "جوال", "الهاتف", "phone"] },
+  { key: "nationalId", label: "رقم الهوية", required: false, guesses: ["الهوية", "هوية", "id"] },
+];
+
 function handleStudentExcelImport(event) {
   const file = event.target.files[0];
   if (!file) return;
   event.target.value = "";
 
   parseImportFile(file, (rows) => {
-    const defaultProg = getActivePrograms()[0] || db.programs[0];
-    let added = 0,
-      updated = 0,
-      skipped = 0;
-    const problems = [];
-
-    const normName = (s) =>
-      cleanText(s, 80).replace(/\s+/g, " ").replace(/[أإآ]/g, "ا").trim();
-
-    rows.forEach((row, i) => {
-      const name = cleanText(
-        pickCol(row, ["الاسم", "اسم", "الطالب", "name"]),
-        80,
-      );
-      const phone = normalizeDigits(
-        pickCol(row, ["الجوال", "جوال", "الهاتف", "الجوّال", "phone", "رقمالجوال"]),
-      );
-      const nationalId = normalizeDigits(
-        pickCol(row, ["الهوية", "هوية", "السجل", "id", "رقمالهوية"]),
-      );
-      const fatherPhone = normalizeDigits(
-        pickCol(row, ["ولي", "الأب", "ولي الأمر", "جوال الأب", "father"]),
-      );
-
-      if (!name && !phone) return; // صف فارغ
-      if (!name || !phone) {
-        skipped++;
-        problems.push(`صف ${i + 2}: نقص الاسم أو الجوال`);
-        return;
-      }
-
-      // 1) مطابقة موجود بالجوال أو الهوية
-      let existing = db.users.find(
-        (u) =>
-          u.role === "student" &&
-          (normalizeDigits(u.phone) === phone ||
-            (nationalId && normalizeDigits(u.nationalId) === nationalId)),
-      );
-
-      // 2) وإلا: مطابقة بالاسم (لتصحيح أرقام حسابات مُدخلة بأرقام خاطئة)
-      if (!existing) {
-        const byName = db.users.filter(
-          (u) => u.role === "student" && normName(u.name) === normName(name),
-        );
-        if (byName.length === 1) existing = byName[0];
-        else if (byName.length > 1) {
-          skipped++;
-          problems.push(`صف ${i + 2} (${name}): يوجد أكثر من طالب بنفس الاسم — صحّحه يدوياً`);
-          return;
-        }
-      }
-
-      if (existing) {
-        // منع تعارض الرقم الجديد مع حساب آخر
-        if (
-          isPhoneTaken(phone, existing.id) ||
-          (nationalId && isNationalIdTaken(nationalId, existing.id))
-        ) {
-          skipped++;
-          problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
-          return;
-        }
-        existing.name = name;
-        existing.avatar = name.substring(0, 2);
-        existing.phone = phone;
-        if (nationalId) existing.nationalId = nationalId;
-        if (fatherPhone) existing.fatherPhone = fatherPhone;
-        if (!existing.email || /^[^@]{0,3}@totin\.sa$/.test(existing.email))
-          existing.email = `${phone}@totin.sa`;
-        updated++;
-        return;
-      }
-
-      // تعارض الجوال/الهوية مع حساب من دور آخر
-      if (isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
-        skipped++;
-        problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
-        return;
-      }
-
-      db.users.push({
-        id: makeId("student"),
-        name: name,
-        role: "student",
-        studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
-        phone: phone,
-        nationalId: nationalId,
-        fatherPhone: fatherPhone || phone,
-        password: "1234",
-        email: `${phone}@totin.sa`,
-        avatar: name.substring(0, 2),
-        currentProgramId: defaultProg.id,
-        currentLevelId: getDefaultLevelId(defaultProg.id),
-        groupId: getDefaultGroupId(defaultProg.id),
-        supervisorId:
-          state.currentUser.role === "supervisor" ? state.currentUser.id : null,
-        progress: 0,
-        isRestricted: false,
-        createdAt: Date.now(),
-      });
-      added++;
-    });
-
-    if (added || updated) {
-      persist("users");
-      logAudit(
-        "استيراد طلاب",
-        `جديد: ${added} | محدّث: ${updated} | متجاهل: ${skipped}`,
-      );
+    if (!rows.length) {
+      alert("الملف فارغ أو تعذّرت قراءته.");
+      return;
     }
-    let msg = `اكتمل الاستيراد:\n• طلاب جدد: ${added}\n• حسابات محدّثة: ${updated}\n• متجاهَل: ${skipped}`;
-    if (problems.length)
-      msg += `\n\nملاحظات:\n${problems.slice(0, 15).join("\n")}`;
-    alert(msg);
-    navigateTo("students");
+    // خطوة مطابقة الأعمدة: المستخدم يختار بنفسه أي عمود في ملفه يقابل كل حقل
+    views.openImportMappingModal("student", rows);
   });
 }
 
@@ -1055,83 +1021,254 @@ function handleSupervisorExcelImport(event) {
   event.target.value = "";
 
   parseImportFile(file, (rows) => {
-    const colors = ["#169BA2", "#E59824", "#8AA838", "#9E1B48", "#2B1736"];
-    const defaultProg = getActivePrograms()[0] || db.programs[0];
-    let added = 0,
-      updated = 0,
-      skipped = 0;
-    const problems = [];
+    if (!rows.length) {
+      alert("الملف فارغ أو تعذّرت قراءته.");
+      return;
+    }
+    views.openImportMappingModal("supervisor", rows);
+  });
+}
 
-    rows.forEach((row, i) => {
-      const name = cleanText(
-        pickCol(row, ["الاسم", "اسم", "المشرف", "name"]),
-        80,
-      );
-      const phone = normalizeDigits(
-        pickCol(row, ["الجوال", "جوال", "الهاتف", "phone"]),
-      );
-      const nationalId = normalizeDigits(
-        pickCol(row, ["الهوية", "هوية", "id"]),
-      );
+// تنفيذ استيراد الطلاب وفق مطابقة أعمدة اختارها المستخدم بنفسه.
+// mapping: { name, phone, nationalId, fatherPhone } كل قيمة = اسم عمود الملف أو "" (بدون)
+// لا حقل إلزامي عدا الاسم — أي حقل تُرك "بدون" يبقى فارغاً في السجل، وهذا متوقّع وليس خطأً.
+function runStudentImport(rows, mapping, programId) {
+  const targetProg =
+    db.programs.find((p) => p.id === programId && isProgramActive(p.id)) ||
+    getActivePrograms()[0] ||
+    db.programs[0];
+  let added = 0,
+    updated = 0,
+    skipped = 0,
+    noLogin = 0;
+  const problems = [];
 
-      if (!name && !phone) return;
-      if (!name || !phone) {
+  const normName = (s) =>
+    cleanText(s, 80).replace(/\s+/g, " ").replace(/[أإآ]/g, "ا").trim();
+  const get = (row, colKey) =>
+    colKey && row[colKey] !== undefined ? String(row[colKey]).trim() : "";
+
+  rows.forEach((row, i) => {
+    const name = cleanText(get(row, mapping.name), 80);
+    const phone = normalizeDigits(get(row, mapping.phone));
+    const nationalId = normalizeDigits(get(row, mapping.nationalId));
+    const fatherPhone = normalizeDigits(get(row, mapping.fatherPhone));
+
+    if (!name) return; // صف بلا اسم = صف فارغ، يُتجاهل بصمت
+
+    // 1) مطابقة موجود بالجوال أو الهوية (إن وُجدا)
+    let existing =
+      phone || nationalId
+        ? db.users.find(
+            (u) =>
+              u.role === "student" &&
+              ((phone && normalizeDigits(u.phone) === phone) ||
+                (nationalId && normalizeDigits(u.nationalId) === nationalId)),
+          )
+        : null;
+
+    // 2) وإلا: مطابقة بالاسم (لتحديث حسابات موجودة بلا رقم صالح)
+    if (!existing) {
+      const byName = db.users.filter(
+        (u) => u.role === "student" && normName(u.name) === normName(name),
+      );
+      if (byName.length === 1) existing = byName[0];
+      else if (byName.length > 1) {
         skipped++;
-        problems.push(`صف ${i + 2}: نقص الاسم أو الجوال`);
+        problems.push(`صف ${i + 2} (${name}): يوجد أكثر من طالب بنفس الاسم — صحّحه يدوياً`);
         return;
       }
+    }
 
-      const existing = db.users.find(
-        (u) =>
-          u.role === "supervisor" &&
-          (normalizeDigits(u.phone) === phone ||
-            (nationalId && normalizeDigits(u.nationalId) === nationalId)),
-      );
-      if (existing) {
-        existing.name = name;
-        existing.avatar = name.substring(0, 2);
-        if (nationalId) existing.nationalId = nationalId;
-        updated++;
-        return;
-      }
-      if (isPhoneTaken(phone) || (nationalId && isNationalIdTaken(nationalId))) {
+    if (existing) {
+      if (
+        (phone && isPhoneTaken(phone, existing.id)) ||
+        (nationalId && isNationalIdTaken(nationalId, existing.id))
+      ) {
         skipped++;
         problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
         return;
       }
-
-      db.users.push({
-        id: makeId("supervisor"),
-        name: name,
-        role: "supervisor",
-        phone: phone,
-        nationalId: nationalId,
-        password: "1234",
-        email: `${phone}@totin.sa`,
-        avatar: name.substring(0, 2),
-        color:
-          colors[
-            db.users.filter((u) => u.role === "supervisor").length %
-              colors.length
-          ],
-        assignedPrograms: [defaultProg.id],
-        assignedGroups: [],
-        isRestricted: false,
-        createdAt: Date.now(),
-      });
-      added++;
-    });
-
-    if (added || updated) {
-      persist("users");
-      logAudit("استيراد مشرفين", `جديد: ${added} | محدّث: ${updated}`);
+      existing.name = name;
+      existing.avatar = name.substring(0, 2);
+      if (phone) existing.phone = phone;
+      if (nationalId) existing.nationalId = nationalId;
+      if (fatherPhone) existing.fatherPhone = fatherPhone;
+      if (
+        phone &&
+        (!existing.email || /^[^@]{0,3}@totin\.sa$/.test(existing.email))
+      )
+        existing.email = `${phone}@totin.sa`;
+      if (!existing.phone && !existing.nationalId) noLogin++;
+      updated++;
+      return;
     }
-    let msg = `اكتمل الاستيراد:\n• مشرفون جدد: ${added}\n• حسابات محدّثة: ${updated}\n• متجاهَل: ${skipped}`;
-    if (problems.length)
-      msg += `\n\nملاحظات:\n${problems.slice(0, 15).join("\n")}`;
-    alert(msg);
-    navigateTo("supervisors");
+
+    if ((phone && isPhoneTaken(phone)) || (nationalId && isNationalIdTaken(nationalId))) {
+      skipped++;
+      problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
+      return;
+    }
+
+    if (!phone && !nationalId) noLogin++;
+
+    db.users.push({
+      id: makeId("student"),
+      name: name,
+      role: "student",
+      studentNumber: `STU-2026-${String(db.users.filter((u) => u.role === "student").length + 1).padStart(3, "0")}`,
+      phone: phone,
+      nationalId: nationalId,
+      fatherPhone: fatherPhone || phone,
+      password: "1234",
+      email: phone ? `${phone}@totin.sa` : "",
+      avatar: name.substring(0, 2),
+      currentProgramId: targetProg.id,
+      currentLevelId: getDefaultLevelId(targetProg.id),
+      groupId: getDefaultGroupId(targetProg.id),
+      supervisorId:
+        state.currentUser.role === "supervisor" ? state.currentUser.id : null,
+      progress: 0,
+      isRestricted: false,
+      createdAt: Date.now(),
+    });
+    added++;
   });
+
+  if (added || updated) {
+    persist("users");
+    logAudit(
+      "استيراد طلاب",
+      `جديد: ${added} | محدّث: ${updated} | متجاهل: ${skipped} | بلا معرّف دخول: ${noLogin}`,
+    );
+  }
+  let msg = `اكتمل الاستيراد إلى برنامج ${targetProg.name}:\n• طلاب جدد: ${added}\n• حسابات محدّثة: ${updated}\n• متجاهَل: ${skipped}`;
+  if (noLogin > 0) {
+    msg += `\n\n⚠️ تنبيه مهم: (${noLogin}) طالباً بلا رقم جوال ولا رقم هوية — لن يستطيعوا تسجيل الدخول حتى تُضاف لهم من «تعديل الطالب».`;
+  }
+  if (problems.length) msg += `\n\nملاحظات:\n${problems.slice(0, 15).join("\n")}`;
+  alert(msg);
+  navigateTo("students");
+}
+
+// تنفيذ استيراد المشرفين وفق مطابقة أعمدة اختارها المستخدم بنفسه
+function runSupervisorImport(rows, mapping, programId) {
+  const colors = ["#169BA2", "#E59824", "#8AA838", "#9E1B48", "#2B1736"];
+  const targetProg =
+    db.programs.find((p) => p.id === programId && isProgramActive(p.id)) ||
+    getActivePrograms()[0] ||
+    db.programs[0];
+  let added = 0,
+    updated = 0,
+    skipped = 0,
+    noLogin = 0;
+  const problems = [];
+  const get = (row, colKey) =>
+    colKey && row[colKey] !== undefined ? String(row[colKey]).trim() : "";
+
+  rows.forEach((row, i) => {
+    const name = cleanText(get(row, mapping.name), 80);
+    const phone = normalizeDigits(get(row, mapping.phone));
+    const nationalId = normalizeDigits(get(row, mapping.nationalId));
+
+    if (!name) return;
+
+    const existing =
+      phone || nationalId
+        ? db.users.find(
+            (u) =>
+              u.role === "supervisor" &&
+              ((phone && normalizeDigits(u.phone) === phone) ||
+                (nationalId && normalizeDigits(u.nationalId) === nationalId)),
+          )
+        : null;
+
+    if (existing) {
+      if (
+        (phone && isPhoneTaken(phone, existing.id)) ||
+        (nationalId && isNationalIdTaken(nationalId, existing.id))
+      ) {
+        skipped++;
+        problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
+        return;
+      }
+      existing.name = name;
+      existing.avatar = name.substring(0, 2);
+      if (phone) existing.phone = phone;
+      if (nationalId) existing.nationalId = nationalId;
+      if (!existing.phone && !existing.nationalId) noLogin++;
+      updated++;
+      return;
+    }
+
+    if ((phone && isPhoneTaken(phone)) || (nationalId && isNationalIdTaken(nationalId))) {
+      skipped++;
+      problems.push(`صف ${i + 2} (${name}): الرقم مستخدم لحساب آخر`);
+      return;
+    }
+
+    if (!phone && !nationalId) noLogin++;
+
+    db.users.push({
+      id: makeId("supervisor"),
+      name: name,
+      role: "supervisor",
+      phone: phone,
+      nationalId: nationalId,
+      password: "1234",
+      email: phone ? `${phone}@totin.sa` : "",
+      avatar: name.substring(0, 2),
+      color:
+        colors[
+          db.users.filter((u) => u.role === "supervisor").length % colors.length
+        ],
+      assignedPrograms: [targetProg.id],
+      assignedGroups: [],
+      isRestricted: false,
+      createdAt: Date.now(),
+    });
+    added++;
+  });
+
+  if (added || updated) {
+    persist("users");
+    logAudit(
+      "استيراد مشرفين",
+      `جديد: ${added} | محدّث: ${updated} | بلا معرّف دخول: ${noLogin}`,
+    );
+  }
+  let msg = `اكتمل الاستيراد إلى برنامج ${targetProg.name}:\n• مشرفون جدد: ${added}\n• حسابات محدّثة: ${updated}\n• متجاهَل: ${skipped}`;
+  if (noLogin > 0) {
+    msg += `\n\n⚠️ تنبيه: (${noLogin}) مشرفاً بلا رقم جوال ولا هوية — لن يستطيعوا الدخول حتى تُضاف لهم البيانات.`;
+  }
+  if (problems.length) msg += `\n\nملاحظات:\n${problems.slice(0, 15).join("\n")}`;
+  alert(msg);
+  navigateTo("supervisors");
+}
+
+// تنزيل ملف (Blob) بأمان في كل المتصفحات - يجب إلحاق الرابط بالصفحة قبل الضغط عليه
+// وإلا يفشل التنزيل بصمت في بعض المتصفحات (خصوصاً فايرفوكس وبعض متصفحات الجوال)
+function downloadBlob(blob, filename) {
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1000);
+    return true;
+  } catch (e) {
+    console.error("تعذر بدء التنزيل:", e);
+    alert(
+      "تعذّر تنزيل الملف من هذا المتصفح. جرّب متصفح Chrome أو Edge الرسمي (وليس متصفحاً مضمّناً داخل تطبيق آخر مثل واتساب أو تويتر).",
+    );
+    return false;
+  }
 }
 
 // تصدير قائمة الطلاب الحاليين إلى Excel (لتعبئة الأرقام الصحيحة ثم إعادة الاستيراد)
@@ -1150,25 +1287,30 @@ function exportStudentsExcel() {
       s.fatherPhone || "",
     ]);
   });
-  try {
-    if (typeof XLSX !== "undefined") {
+  if (typeof XLSX !== "undefined") {
+    try {
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws["!cols"] = [{ wch: 34 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "الطلاب");
-      XLSX.writeFile(wb, "الطلاب_للتعبئة.xlsx");
+      const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      downloadBlob(
+        new Blob([out], { type: "application/octet-stream" }),
+        "الطلاب_للتعبئة.xlsx",
+      );
       return;
+    } catch (e) {
+      console.warn("فشل تصدير xlsx، سيُستخدم CSV:", e);
     }
-  } catch (e) {
-    console.warn(e);
+  } else {
+    console.warn("مكتبة Excel (XLSX) لم تُحمَّل - يُصدَّر CSV بدلاً منها.");
   }
   const csv =
     "﻿" + rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "الطلاب_للتعبئة.csv";
-  a.click();
+  downloadBlob(
+    new Blob([csv], { type: "text/csv;charset=utf-8" }),
+    "الطلاب_للتعبئة.csv",
+  );
 }
 
 // تنزيل قالب Excel للاستيراد
@@ -1181,27 +1323,29 @@ function downloadImportTemplate(kind) {
     kind === "supervisor"
       ? ["أحمد محمد", "0551234567", "1012345678"]
       : ["عبدالله سعد", "0551234567", "1122334455", "0509876543"];
-  try {
-    if (typeof XLSX !== "undefined") {
+  if (typeof XLSX !== "undefined") {
+    try {
       const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "قالب");
-      XLSX.writeFile(
-        wb,
+      const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      downloadBlob(
+        new Blob([out], { type: "application/octet-stream" }),
         kind === "supervisor" ? "قالب_المشرفين.xlsx" : "قالب_الطلاب.xlsx",
       );
       return;
+    } catch (e) {
+      console.warn("فشل تصدير xlsx، سيُستخدم CSV:", e);
     }
-  } catch (e) {
-    console.warn(e);
+  } else {
+    console.warn("مكتبة Excel (XLSX) لم تُحمَّل - يُصدَّر CSV بدلاً منها.");
   }
   // احتياطي CSV
   const csv = "﻿" + headers.join(",") + "\n" + sample.join(",");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = kind === "supervisor" ? "قالب_المشرفين.csv" : "قالب_الطلاب.csv";
-  a.click();
+  downloadBlob(
+    new Blob([csv], { type: "text/csv;charset=utf-8" }),
+    kind === "supervisor" ? "قالب_المشرفين.csv" : "قالب_الطلاب.csv",
+  );
 }
 
 // 7. نظام التحضير المتعدد والغياب التلقائي نهاية اليوم
@@ -1219,11 +1363,111 @@ function todayStr() {
   return localDateStr(new Date());
 }
 
-// تاريخ سياق التحضير: تاريخ "مراجعة يوم" إذا كان المدير داخلها، وإلا تاريخ اليوم
+// تاريخ سياق التحضير: تاريخ "مراجعة يوم" إن كان المدير داخلها، أو التاريخ الذي اختاره
+// المشرف/المدير في شاشة التحضير السريع، وإلا تاريخ اليوم
 function attendanceContextDate() {
-  return state.currentView === "day-review" && state.reviewDate
-    ? state.reviewDate
-    : todayStr();
+  if (state.currentView === "day-review" && state.reviewDate)
+    return state.reviewDate;
+  if (state.currentView === "quick-attendance" && state.quickAttDate)
+    return state.quickAttDate;
+  return todayStr();
+}
+
+// ===== جلسة "تحضير يومي" عامة لكل برنامج =====
+// تسمح بالتحضير في أي يوم حتى لو لم تكن له جلسة مجدولة. ليست محفوظة ضمن db.schedules
+// (لا تظهر في الجدول الأسبوعي)، ويُتعرَّف عليها من المعرّف "adhoc_<programId>".
+function getAdhocSchedule(programId) {
+  return {
+    id: "adhoc_" + programId,
+    programId: programId,
+    title: "تحضير يومي",
+    time: "—",
+    type: "attendance",
+    typeLabel: "تحضير",
+    dayOfWeek: null,
+    requiresAttendance: true,
+    adhoc: true,
+    details: "",
+  };
+}
+
+// إيجاد جلسة بالمعرّف: الجلسات المجدولة الحقيقية أو جلسة التحضير اليومي العامة
+function getScheduleById(id) {
+  const s = (db.schedules || []).find((x) => x.id === id);
+  if (s) return s;
+  if (typeof id === "string" && id.indexOf("adhoc_") === 0) {
+    const pid = id.slice(6);
+    if ((db.programs || []).some((p) => p.id === pid)) return getAdhocSchedule(pid);
+  }
+  return null;
+}
+
+// طريقة احتساب أيام التحضير (من إعدادات التطبيق):
+//  "taken"     = اليوم يُعتبر يوم تحضير فقط إذا رُصد فيه تحضير فعلاً (الافتراضي)
+//  "scheduled" = أيام الجلسات المجدولة + أي يوم رُصد فيه تحضير
+function getAttendanceMode() {
+  const m = getAppSettings().attendanceMode;
+  return m === "scheduled" ? "scheduled" : "taken";
+}
+
+function setAttendanceMode(mode) {
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  const app = getAppSettings();
+  app.attendanceMode = mode === "scheduled" ? "scheduled" : "taken";
+  persist("appSettings");
+  logAudit(
+    "تغيير طريقة أيام التحضير",
+    app.attendanceMode === "scheduled"
+      ? "أيام الجلسات المجدولة + أي يوم يُرصد فيه"
+      : "أي يوم يُرصد فيه تحضير فقط",
+  );
+  navigateTo(state.currentView);
+}
+
+// سجل رُصد يدوياً (وليس غياباً تلقائياً ولا ناتجاً عن استئذان معتمد)
+function isManualAttendanceRecord(r) {
+  return Boolean(
+    r && !r.auto && r.recordedBy !== "excuse" && r.recordedBy !== "system",
+  );
+}
+
+// حذف الغياب التلقائي القديم من الأيام التي لم يُرصد فيها أي تحضير يدوي
+// (مفيد بعد التحول إلى طريقة "أي يوم يُرصد فيه تحضير فقط")
+function cleanupAutoAbsences() {
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  const recs = db.attendanceRecords || [];
+  const takenDays = new Set();
+  recs.forEach((r) => {
+    if (!isManualAttendanceRecord(r)) return;
+    const pid = r.programId || (getScheduleById(r.scheduleId) || {}).programId;
+    if (pid) takenDays.add(pid + "|" + r.date);
+  });
+  const isOrphanAuto = (r) =>
+    r &&
+    r.auto &&
+    r.recordedBy === "system" &&
+    r.status === "غائب" &&
+    !takenDays.has(
+      (r.programId || (getScheduleById(r.scheduleId) || {}).programId) +
+        "|" +
+        r.date,
+    );
+  const n = recs.filter(isOrphanAuto).length;
+  if (n === 0) {
+    alert("لا يوجد غياب تلقائي في أيام لم يُرصد فيها تحضير.");
+    return;
+  }
+  if (
+    !confirm(
+      `سيتم حذف (${n}) سجل غياب تلقائي من أيام لم يُرصد فيها أي تحضير فعلي.\nالسجلات اليدوية لا تُمس. متابعة؟`,
+    )
+  )
+    return;
+  db.attendanceRecords = recs.filter((r) => !isOrphanAuto(r));
+  persist("attendanceRecords");
+  logAudit("تنظيف الغياب التلقائي", `${n} سجل`);
+  alert(`تم حذف (${n}) سجل.`);
+  navigateTo(state.currentView);
 }
 
 function toggleSelectAllAttendance(masterCheckbox) {
@@ -1251,7 +1495,7 @@ function bulkRecordAttendance(scheduleId, status, date) {
 
 function markRemainingAbsent(scheduleId, date) {
   const d = date || attendanceContextDate();
-  const schedule = db.schedules.find((s) => s.id === scheduleId);
+  const schedule = getScheduleById(scheduleId);
   if (!schedule) return;
 
   const students = db.users.filter(
@@ -1277,19 +1521,32 @@ function markRemainingAbsent(scheduleId, date) {
   }
 }
 
-// تغييب تلقائي: نهاية كل يوم، أي طالب لم يُرصد في جلسة تتطلب تحضيراً يُحتسب غائباً
-// (يشمل حالة عدم تحضير أي أحد إطلاقاً). يُطبّق على الأيام السابقة فقط.
+// تغييب تلقائي نهاية اليوم: في كل يوم تحضير، أي طالب لم يُرصد يُحتسب غائباً.
+// "يوم التحضير" = يوم رُصد فيه تحضير فعلاً لذلك البرنامج (ولو لطالب واحد، في أي يوم كان)،
+// وإن كانت الطريقة "scheduled" فتُضاف أيام الجلسات المجدولة أيضاً. يُطبّق على الأيام السابقة فقط.
 function sweepAutoAbsence() {
   if (!Array.isArray(db.attendanceRecords)) db.attendanceRecords = [];
   const today = new Date();
   const todayISO = todayStr();
+  const mode = getAttendanceMode();
   let added = 0;
 
   const activeProgramIds = getActivePrograms().map((p) => p.id);
-  const attSchedules = (db.schedules || []).filter(
-    (s) => s.requiresAttendance && activeProgramIds.includes(s.programId),
-  );
-  if (attSchedules.length === 0) return;
+  if (!activeProgramIds.length) return;
+
+  // الجلسات التي رُصد فيها تحضير يدوي لكل (برنامج|تاريخ)
+  const taken = {};
+  // فهرس سريع للسجلات الموجودة (جلسة|طالب|تاريخ)
+  const existing = new Set();
+  db.attendanceRecords.forEach((r) => {
+    if (!r) return;
+    existing.add(r.scheduleId + "|" + r.studentId + "|" + (r.date || ""));
+    if (!isManualAttendanceRecord(r)) return;
+    const pid = r.programId || (getScheduleById(r.scheduleId) || {}).programId;
+    if (!pid) return;
+    const k = pid + "|" + r.date;
+    (taken[k] = taken[k] || new Set()).add(r.scheduleId);
+  });
 
   // آخر 21 يوماً السابقة فقط
   for (let back = 1; back <= 21; back++) {
@@ -1299,43 +1556,50 @@ function sweepAutoAbsence() {
     if (iso >= todayISO) continue;
     const weekday = d.getDay();
 
-    attSchedules
-      .filter((s) => s.dayOfWeek === weekday)
-      .forEach((sch) => {
-        const students = db.users.filter(
-          (u) =>
-            u.role === "student" &&
-            u.currentProgramId === sch.programId &&
-            !u.isRestricted &&
-            // لا نُغيّب طالباً أُضيف بعد ذلك اليوم
-            (!u.createdAt || u.createdAt <= d.getTime() + 86400000),
-        );
+    activeProgramIds.forEach((pid) => {
+      const sessions = new Set(taken[pid + "|" + iso] || []);
+      if (mode === "scheduled") {
+        (db.schedules || [])
+          .filter(
+            (s) =>
+              s.programId === pid && s.requiresAttendance && s.dayOfWeek === weekday,
+          )
+          .forEach((s) => sessions.add(s.id));
+      }
+      if (!sessions.size) return; // ليس يوم تحضير لهذا البرنامج
+
+      const students = db.users.filter(
+        (u) =>
+          u.role === "student" &&
+          u.currentProgramId === pid &&
+          !u.isRestricted &&
+          // لا نُغيّب طالباً أُضيف بعد ذلك اليوم
+          (!u.createdAt || u.createdAt <= d.getTime() + 86400000),
+      );
+
+      sessions.forEach((sid) => {
         students.forEach((st) => {
-          const exists = db.attendanceRecords.some(
-            (r) =>
-              r.scheduleId === sch.id &&
-              r.studentId === st.id &&
-              (r.date || "") === iso,
-          );
-          if (!exists) {
-            const excused = hasApprovedExcuse(st.id, iso);
-            const exReason = excused ? approvedExcuseReason(st.id, iso) : "";
-            db.attendanceRecords.push({
-              id: `att_${sch.id}_${st.id}_${iso}`,
-              scheduleId: sch.id,
-              studentId: st.id,
-              programId: sch.programId,
-              date: iso,
-              status: excused ? "مستأذن" : "غائب",
-              excuseReason: exReason,
-              auto: true,
-              updatedAt: `${iso} (تلقائي نهاية اليوم)`,
-              recordedBy: "system",
-            });
-            added++;
-          }
+          const key = sid + "|" + st.id + "|" + iso;
+          if (existing.has(key)) return;
+          existing.add(key);
+          const excused = hasApprovedExcuse(st.id, iso);
+          const exReason = excused ? approvedExcuseReason(st.id, iso) : "";
+          db.attendanceRecords.push({
+            id: `att_${sid}_${st.id}_${iso}`,
+            scheduleId: sid,
+            studentId: st.id,
+            programId: pid,
+            date: iso,
+            status: excused ? "مستأذن" : "غائب",
+            excuseReason: exReason,
+            auto: true,
+            updatedAt: `${iso} (تلقائي نهاية اليوم)`,
+            recordedBy: "system",
+          });
+          added++;
         });
       });
+    });
   }
 
   if (added > 0) persist("attendanceRecords");
@@ -1962,7 +2226,7 @@ function recordAttendance(scheduleId, studentId, status, date, skipPersist, reas
   if (!db.attendanceRecords) db.attendanceRecords = [];
   const d = date || attendanceContextDate();
 
-  const schedule = (db.schedules || []).find((s) => s.id === scheduleId);
+  const schedule = getScheduleById(scheduleId);
   const now = new Date();
   const timeStr = `${now.toLocaleDateString("ar-SA")} - ${now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`;
   const exReason =
@@ -2662,6 +2926,33 @@ function notifTargetsCurrentUser(n) {
   // الإشعارات الموجّهة لدور "admin" تصل لكل الإداريين
   if (state.currentRole === "admin" && n.userId === "admin") return true;
   return false;
+}
+
+// عرض إشعار نظام فوري عند وصول إشعار جديد للمستخدم الحالي أثناء فتح التطبيق
+// (ولو في الخلفية/تبويب آخر). لا يعمل إن كان المتصفح مغلقاً تماماً - ذلك يحتاج
+// خادم دفع (Firebase Cloud Messaging) وهو تحسين منفصل يمكن إضافته لاحقاً.
+function checkNewNotifications() {
+  if (!state.currentUser) return;
+  const mine = (window.db.notifications || []).filter(notifTargetsCurrentUser);
+
+  if (!window.__seenNotifInit) {
+    // أول تشغيل بعد الدخول: اعتبر كل الموجود "معروفاً" حتى لا تنهال إشعارات قديمة دفعة واحدة
+    window.__seenNotifIds = new Set(mine.map((n) => n.id));
+    window.__seenNotifInit = true;
+    return;
+  }
+
+  if (!window.__seenNotifIds) window.__seenNotifIds = new Set();
+  const fresh = mine.filter((n) => !window.__seenNotifIds.has(n.id));
+  if (fresh.length === 0) return;
+
+  fresh.forEach((n) => window.__seenNotifIds.add(n.id));
+  if (typeof window.showLocalNotification !== "function") return;
+
+  // لا نُظهر أكثر من ٣ نوافذ دفعة واحدة تفادياً للإزعاج
+  fresh.slice(0, 3).forEach((n) => {
+    window.showLocalNotification(n.title || "إشعار جديد", n.message || "", n.id);
+  });
 }
 
 function renderNotificationsList() {

@@ -4,7 +4,7 @@
  * يجب أن يبقى هذا الملف في جذر الموقع بجانب index.html
  */
 
-const CACHE_NAME = "totin-platform-v1";
+const CACHE_NAME = "totin-platform-v2";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -14,6 +14,7 @@ const CORE_ASSETS = [
   "./views.js",
   "./app.js",
   "./pwa.js",
+  "./push.js",
   "./manifest.json",
   "./logo15.png",
   "./logo16.png",
@@ -59,21 +60,33 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
-// استقبال إشعار Push (في حال ربط خادم إرسال لاحقاً) وعرضه
+// استقبال إشعار Push من Firebase Cloud Messaging (يصل حتى والتطبيق مغلق أو في الخلفية)
+// الدالة السحابية ترسل رسالة "data" فيها: title, body, tag, link
 self.addEventListener("push", (event) => {
-  let data = { title: "المنصة الالكترونية", body: "لديك إشعار جديد" };
+  let title = "المنصة الالكترونية";
+  let body = "لديك إشعار جديد";
+  let tag;
+  let link = "./index.html";
   try {
-    if (event.data) data = Object.assign(data, event.data.json());
+    const p = event.data ? event.data.json() : {};
+    const d = p.data || p.notification || p;
+    if (d.title) title = d.title;
+    if (d.body) body = d.body;
+    if (d.tag) tag = d.tag;
+    if (d.link) link = d.link;
   } catch (e) {
-    if (event.data) data.body = event.data.text();
+    if (event.data) body = event.data.text();
   }
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
+    self.registration.showNotification(title, {
+      body: body,
       icon: "logo15.png",
       badge: "logo15.png",
       dir: "rtl",
       lang: "ar",
+      // نفس الوسم المستخدم داخل التطبيق => لا يتكرر الإشعار لو كان التطبيق مفتوحاً
+      tag: tag,
+      data: { link: link },
     }),
   );
 });
@@ -81,14 +94,16 @@ self.addEventListener("push", (event) => {
 // فتح التطبيق عند الضغط على الإشعار
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const link =
+    (event.notification.data && event.notification.data.link) || "./index.html";
   event.waitUntil(
-    self.clients.matchAll({ type: "window" }).then((clientList) => {
-      for (const client of clientList) {
-        if ("focus" in client) return client.focus();
-      }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow("./index.html");
-      }
-    }),
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if ("focus" in client) return client.focus();
+        }
+        if (self.clients.openWindow) return self.clients.openWindow(link);
+      }),
   );
 });

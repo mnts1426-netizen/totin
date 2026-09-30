@@ -78,7 +78,7 @@ window.db = {
     "أن يتم رصد مدى رضا الطلاب عن الدرس الأسبوعي",
   ],
 
-  // 2. برامج المنصة الأساسية - تأصيل ورسوخ مغلقان حالياً (isClosed) ولا يتم العمل عليهما
+  // 2. برامج المنصة الأساسية - الثلاثة مفعّلة (تأصيل ورسوخ أُعيد فتحهما)
   programs: [
     {
       id: "prog_taheel",
@@ -91,14 +91,12 @@ window.db = {
       name: "تأصيل",
       color: "#0B2533",
       levelsCount: 3,
-      isClosed: true,
     },
     {
       id: "prog_rasookh",
       name: "رسوخ",
       color: "#D4A359",
       levelsCount: 2,
-      isClosed: true,
     },
   ],
 
@@ -155,6 +153,20 @@ window.db = {
       levelId: "lvl_th_1",
       programId: "prog_taheel",
       name: "المجموعة الأولى - تأهيل",
+      supervisorId: null,
+    },
+    {
+      id: "grp_ts_001",
+      levelId: "lvl_ts_1",
+      programId: "prog_taseel",
+      name: "المجموعة الأولى - تأصيل",
+      supervisorId: null,
+    },
+    {
+      id: "grp_rs_001",
+      levelId: "lvl_rs_1",
+      programId: "prog_rasookh",
+      name: "المجموعة الأولى - رسوخ",
       supervisorId: null,
     },
   ],

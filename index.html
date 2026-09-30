@@ -40,6 +40,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
+    <!-- مكتبة المسح بكاميرا الجوال (QR وباركود) للتحضير السريع -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+
     <!-- مكتبة SheetJS لقراءة ملفات Excel (xlsx/xls) و CSV -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
@@ -287,6 +290,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js"></script>
 
     <!-- ربط الملفات البرمجية بالترتيب الصحيح -->
     <script src="data.js"></script>
@@ -294,5 +298,12 @@
     <script src="views.js"></script>
     <script src="app.js"></script>
     <script src="pwa.js"></script>
+    <script>
+      // رابط دالة Supabase المرسِلة للإشعارات (فارغ = معطّل)، مثال:
+      // "https://XXXX.supabase.co/functions/v1/send-push"
+      window.PUSH_SEND_URL =
+        "https://wbffddenlivyuzeqrfda.supabase.co/functions/v1/send-push";
+    </script>
+    <script src="push.js"></script>
   </body>
 </html>

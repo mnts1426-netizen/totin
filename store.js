@@ -165,6 +165,12 @@ window.store = (function () {
         .set({ items: arr, updatedAt: Date.now() })
         .then(() => {
           remoteCount[name] = arr.length;
+          // إشعار بقية الملفات (push.js) أن الحفظ السحابي اكتمل
+          try {
+            window.dispatchEvent(
+              new CustomEvent("totin:cloud-saved", { detail: { name } }),
+            );
+          } catch (e) {}
         })
         .catch((e) => console.warn("تعذر الحفظ السحابي (" + name + "):", e));
     } catch (e) {
