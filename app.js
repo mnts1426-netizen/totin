@@ -74,6 +74,16 @@ function isNationalIdTaken(nationalId, exceptUserId) {
 }
 
 // إيجاد مستخدم عبر رقم الجوال أو رقم الهوية
+// إيجاد حساب بالمعرّف: المستخدمون (إدارة/مشرفون/طلاب) أو أولياء الأمور (قائمة مستقلة)
+function findAccountById(id) {
+  if (!id) return null;
+  return (
+    (window.db.users || []).find((u) => u && u.id === id) ||
+    (window.db.parents || []).find((p) => p && p.id === id) ||
+    null
+  );
+}
+
 function findUserByPhoneOrId(value) {
   const v = normalizeDigits(value);
   if (!v) return null;
@@ -99,6 +109,13 @@ function getDefaultGroupId(programId) {
 
 function makeId(prefix) {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+}
+
+// معرّف لا يتكرر حتى لو أُنشئ مئات في نفس اللحظة (استيراد، إشعارات جماعية)
+let __uidCounter = 0;
+function makeUniqueId(prefix) {
+  __uidCounter = (__uidCounter + 1) % 1000000;
+  return `${prefix}_${Date.now().toString(36)}${__uidCounter.toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
 // ===== الحماية من حقن الأكواد (XSS) =====
@@ -253,9 +270,10 @@ function ensureAttendanceArchive(fromISO, toISO, cb) {
     return;
   }
   const months = [];
-  const cur = new Date((fromISO || "2000-01-01") + "T00:00:00");
-  const end = new Date((toISO || todayStr()) + "T00:00:00");
-  while (cur <= end && months.length < 60) {
+  // نبدأ من أول الشهر حتى لا يُتخطّى شهر (31 يناير + شهر = 3 مارس)
+  const cur = new Date((fromISO || "2000-01-01").slice(0, 7) + "-01T00:00:00");
+  const endKey = (toISO || todayStr()).slice(0, 7);
+  while (localDateStr(cur).slice(0, 7) <= endKey && months.length < 60) {
     const key = localDateStr(cur).slice(0, 7);
     if (!window.__attArchLoaded[key]) months.push(key);
     cur.setMonth(cur.getMonth() + 1);
@@ -278,16 +296,37 @@ function ensureAttendanceArchive(fromISO, toISO, cb) {
   });
 }
 
-// أرشفة السجلات الأقدم من الحدّ الحيّ (المدير فقط، مرة كل جلسة، عند تجاوز عتبة)
-function maybeArchiveAttendance() {
-  if (__attArchiveCheckedThisSession) return;
-  if (!state.currentUser || state.currentUser.role !== "admin") return;
-  if (!window.store || !window.store.firstSyncDone()) return;
-  const live = window.db.attendanceRecords || [];
-  if (live.length < 1200) return; // لا داعي قبل ذلك
-  __attArchiveCheckedThisSession = true;
-  const cutoff = liveAttendanceCutoff();
-  window.store
+// حدّ الأمان لحجم وثيقة التحضير الحيّة (حد Firestore للوثيقة الواحدة 1 ميجا تقريباً)
+const ATT_LIVE_SAFE_BYTES = 550 * 1024;
+const ATT_LIVE_MIN_DAYS = 60; // عند تجاوز الحدّ تبقى آخر 60 يوماً حيّة على الأقل
+
+function attendanceLiveBytes() {
+  try {
+    return JSON.stringify(window.db.attendanceRecords || []).length;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// تسجيل آخر تاريخ نُقل للأرشيف (ليُحمَّل تلقائياً إن كان داخل الفصل الحالي)
+function noteAttendanceArchivedThrough(maxDate) {
+  if (!maxDate) return;
+  const app = getAppSettings();
+  if (!app.attArchivedThrough || app.attArchivedThrough < maxDate) {
+    app.attArchivedThrough = maxDate;
+    persist("appSettings");
+  }
+}
+
+function archiveAttendanceBefore(cutoff) {
+  const moving = (window.db.attendanceRecords || []).filter(
+    (r) => (r.date || "") < cutoff,
+  );
+  const maxDate = moving.reduce(
+    (m, r) => ((r.date || "") > m ? r.date : m),
+    "",
+  );
+  return window.store
     .archiveOld(
       "attendanceRecords",
       (r) => (r.date || "") < cutoff,
@@ -295,10 +334,71 @@ function maybeArchiveAttendance() {
     )
     .then((res) => {
       if (res.moved > 0) {
-        logAudit("أرشفة تلقائية", `${res.moved} سجل تحضير قديم`);
-        navigateTo(state.currentView);
+        // السجلات المنقولة موجودة في الذاكرة: نضيفها لأرشيف الجلسة مباشرة
+        // فتبقى الإحصاءات كاملة دون أي قراءة إضافية
+        const liveIds = new Set(
+          (window.db.attendanceRecords || []).map((r) => r && r.id),
+        );
+        if (!Array.isArray(window.db._attArch)) window.db._attArch = [];
+        const have = new Set(window.db._attArch.map((r) => r && r.id));
+        moving.forEach((r) => {
+          if (r && r.id && !liveIds.has(r.id) && !have.has(r.id))
+            window.db._attArch.push(r);
+        });
+        noteAttendanceArchivedThrough(maxDate);
       }
+      return res;
     });
+}
+
+// أرشفة السجلات الأقدم من الحدّ الحيّ (المدير فقط، مرة كل جلسة، عند تجاوز عتبة)
+function maybeArchiveAttendance() {
+  if (__attArchiveCheckedThisSession) return;
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  if (!window.store || !window.store.firstSyncDone()) return;
+  const live = window.db.attendanceRecords || [];
+  const tooBig = attendanceLiveBytes() > ATT_LIVE_SAFE_BYTES;
+  if (live.length < 1200 && !tooBig) return; // لا داعي قبل ذلك
+  __attArchiveCheckedThisSession = true;
+  let cutoff = liveAttendanceCutoff();
+  if (tooBig) {
+    // الوثيقة تقترب من حدّها: نؤرشف حتى داخل الفصل الحالي (تبقى آخر 60 يوماً حيّة)،
+    // وأشهر الفصل المؤرشفة تُحمَّل تلقائياً فلا تتأثر الإحصاءات.
+    const d = new Date();
+    d.setDate(d.getDate() - ATT_LIVE_MIN_DAYS);
+    const bySize = localDateStr(d);
+    if (bySize > cutoff) cutoff = bySize;
+  }
+  archiveAttendanceBefore(cutoff).then((res) => {
+    if (res.moved > 0) {
+      logAudit("أرشفة تلقائية", `${res.moved} سجل تحضير قديم`);
+      navigateTo(state.currentView);
+    }
+  });
+}
+
+// إن نُقلت سجلات من الفصل الحالي للأرشيف، تُحمَّل أشهرها مرة واحدة لكل جلسة
+// حتى تبقى إحصاءات الفصل والتقارير كاملة. (لا قراءات إضافية إن لم يحدث ذلك)
+let __termArchivePreloaded = false;
+function preloadTermArchiveIfNeeded() {
+  if (__termArchivePreloaded) return;
+  if (!window.store || !window.store.firstSyncDone()) return;
+  const through = getAppSettings().attArchivedThrough;
+  const tStart = termStartDate();
+  if (!through || through < tStart) return;
+  __termArchivePreloaded = true;
+  // شهر قد يكون حُمّل (فارغاً) قبل نقل سجلاته للأرشيف: نعيد تحميل أشهر الفصل مرة واحدة
+  const m = new Date(tStart.slice(0, 7) + "-01T00:00:00");
+  while (localDateStr(m).slice(0, 7) <= through.slice(0, 7)) {
+    delete window.__attArchLoaded[localDateStr(m).slice(0, 7)];
+    m.setMonth(m.getMonth() + 1);
+  }
+  const before = (window.db._attArch || []).length;
+  ensureAttendanceArchive(tStart, through, () => {
+    if ((window.db._attArch || []).length !== before && state.currentUser) {
+      navigateTo(state.currentView);
+    }
+  });
 }
 
 // أرشفة يدوية فورية (زر في شاشة الفصل الدراسي)
@@ -318,12 +418,7 @@ function archiveAttendanceNow() {
     )
   )
     return;
-  window.store
-    .archiveOld(
-      "attendanceRecords",
-      (r) => (r.date || "") < cutoff,
-      (r) => (r.date || "2000-01").slice(0, 7),
-    )
+  archiveAttendanceBefore(cutoff)
     .then((res) => {
       logAudit("أرشفة يدوية", `${res.moved} سجل`);
       alert(`تمت أرشفة (${res.moved}) سجل.`);
@@ -474,10 +569,23 @@ function initApp() {
       } catch (e) {
         console.warn(e);
       }
+      try {
+        preloadTermArchiveIfNeeded();
+      } catch (e) {
+        console.warn(e);
+      }
+      try {
+        migrateAllPasswordsIfAdmin();
+      } catch (e) {
+        console.warn(e);
+      }
+      try {
+        if (window.content) window.content.runReadingReminders();
+      } catch (e) {
+        console.warn(e);
+      }
       if (state.currentUser) {
-        const stillValid = (window.db.users || []).find(
-          (u) => u.id === state.currentUser.id,
-        );
+        const stillValid = findAccountById(state.currentUser.id);
         if (!stillValid) {
           logoutUser();
           return;
@@ -544,14 +652,23 @@ function restoreSession() {
   if (!s || !s.userId || !s.ts || Date.now() - s.ts > SESSION_MAX_AGE) {
     return false;
   }
-  const user = (window.db.users || []).find((u) => u.id === s.userId);
+  const user = findAccountById(s.userId);
   if (!user || user.isRestricted) {
     clearSession();
     return false;
   }
-  // احترام قيود الرابط: رابط الطلاب للطلاب فقط والعكس
-  if (state.portalMode === "student" && user.role !== "student") return false;
-  if (state.portalMode === "staff" && user.role === "student") return false;
+  // احترام قيود الرابط: رابط الطلاب للطلاب (وأولياء أمورهم) فقط والعكس
+  if (
+    state.portalMode === "student" &&
+    user.role !== "student" &&
+    user.role !== "parent"
+  )
+    return false;
+  if (
+    state.portalMode === "staff" &&
+    (user.role === "student" || user.role === "parent")
+  )
+    return false;
 
   state.currentUser = user;
   state.currentRole = user.role;
@@ -635,7 +752,9 @@ function showAppControls(user) {
         ? "إدارة كاملة لكل البرامج"
         : user.role === "supervisor"
           ? "مشرف معتمد"
-          : "طالب مسجل";
+          : user.role === "parent"
+            ? "ولي أمر"
+            : "طالب مسجل";
   }
   if (avatarEl) {
     avatarEl.innerText = user.avatar;
@@ -643,6 +762,170 @@ function showAppControls(user) {
 
   if (window.views && typeof window.views.renderSidebar === "function") {
     window.views.renderSidebar(user.role);
+  }
+}
+
+// ===== حماية كلمات المرور =====
+// تُحفظ كلمة المرور "مُشفّرة" (بصمة SHA-256 متكررة) في الحقل passHash بدل النص الواضح.
+// الحسابات القديمة (password نص واضح) تبقى تعمل، وتُحوَّل تلقائياً عند دخول صاحبها أو دخول المدير.
+const SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function sha256Hex(message) {
+  const bytes = new TextEncoder().encode(String(message));
+  const len = bytes.length;
+  const total = ((len + 9 + 63) >> 6) << 6;
+  const buf = new Uint8Array(total);
+  buf.set(bytes);
+  buf[len] = 0x80;
+  const dv = new DataView(buf.buffer);
+  const bits = len * 8;
+  dv.setUint32(total - 8, Math.floor(bits / 0x100000000));
+  dv.setUint32(total - 4, bits >>> 0);
+  const H = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ];
+  const W = new Uint32Array(64);
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let off = 0; off < total; off += 64) {
+    for (let i = 0; i < 16; i++) W[i] = dv.getUint32(off + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
+      const s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
+      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++) {
+      const t1 =
+        (h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + SHA256_K[i] + W[i]) >>> 0;
+      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + t1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) >>> 0;
+    }
+    H[0] = (H[0] + a) >>> 0;
+    H[1] = (H[1] + b) >>> 0;
+    H[2] = (H[2] + c) >>> 0;
+    H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0;
+    H[5] = (H[5] + f) >>> 0;
+    H[6] = (H[6] + g) >>> 0;
+    H[7] = (H[7] + h) >>> 0;
+  }
+  return H.map((x) => x.toString(16).padStart(8, "0")).join("");
+}
+
+const PASS_HASH_PREFIX = "h1$";
+const PASS_HASH_ROUNDS = 500;
+
+// البصمة مرتبطة بمعرّف الحساب، فنفس كلمة المرور لحسابين تعطي بصمتين مختلفتين
+function passwordHashFor(userId, plain) {
+  let h = sha256Hex("totin|" + userId + "|" + String(plain));
+  for (let i = 1; i < PASS_HASH_ROUNDS; i++) h = sha256Hex(h + "|" + userId);
+  return PASS_HASH_PREFIX + h;
+}
+
+function setUserPassword(user, plain) {
+  if (!user || !user.id) return;
+  user.passHash = passwordHashFor(user.id, plain);
+  delete user.password;
+}
+
+// الحساب بلا كلمة مرور محفوظة يُعامل بالافتراضية 1234 (كما كانت الشاشات تعرضه)
+function checkUserPassword(user, plain) {
+  if (!user) return false;
+  if (user.passHash) return user.passHash === passwordHashFor(user.id, plain);
+  return (user.password || "1234") === plain;
+}
+
+// تحويل كلمة مرور حساب قديم (نص واضح) إلى بصمة. يعيد true إن تغيّر شيء.
+function migrateUserPassword(user) {
+  if (!user || user.passHash) {
+    if (user && user.passHash && user.password !== undefined) {
+      delete user.password;
+      return true;
+    }
+    return false;
+  }
+  setUserPassword(user, user.password || "1234");
+  return true;
+}
+
+// المدير: تحويل كل الحسابات القديمة مرة واحدة لكل جلسة (بعد أول مزامنة فقط)
+let __passMigrationDone = false;
+function migrateAllPasswordsIfAdmin() {
+  if (__passMigrationDone) return;
+  if (!state.currentUser || state.currentUser.role !== "admin") return;
+  if (window.store && window.store.isCloudConnected() && !window.store.firstSyncDone())
+    return;
+  __passMigrationDone = true;
+  let n = 0;
+  (window.db.users || []).forEach((u) => {
+    if (migrateUserPassword(u)) n++;
+  });
+  if (n > 0) {
+    persist("users");
+    logAudit("حماية كلمات المرور", `تشفير ${n} كلمة مرور`);
+  }
+}
+
+// حد المحاولات الخاطئة: 5 محاولات ثم إيقاف 5 دقائق (على هذا الجهاز)
+const LOGIN_FAIL_KEY = "totin_login_fail";
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_LOCK_MS = 5 * 60 * 1000;
+
+function loginFailState() {
+  try {
+    return JSON.parse(localStorage.getItem(LOGIN_FAIL_KEY) || "{}") || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function loginLockedMinutes(userId) {
+  const s = loginFailState()[userId];
+  if (!s || !s.until || s.until <= Date.now()) return 0;
+  return Math.ceil((s.until - Date.now()) / 60000);
+}
+
+function recordLoginFail(userId) {
+  const all = loginFailState();
+  let s = all[userId] || { n: 0 };
+  if (s.until && s.until <= Date.now()) s = { n: 0 }; // انتهى إيقاف سابق
+  s.n = (s.n || 0) + 1;
+  let left = LOGIN_MAX_FAILS - s.n;
+  if (left <= 0) {
+    s = { n: 0, until: Date.now() + LOGIN_LOCK_MS };
+    left = 0;
+  }
+  all[userId] = s;
+  try {
+    localStorage.setItem(LOGIN_FAIL_KEY, JSON.stringify(all));
+  } catch (e) {}
+  return left; // عدد المحاولات المتبقية (0 = أُوقف الآن)
+}
+
+function clearLoginFails(userId) {
+  const all = loginFailState();
+  if (all[userId]) {
+    delete all[userId];
+    try {
+      localStorage.setItem(LOGIN_FAIL_KEY, JSON.stringify(all));
+    } catch (e) {}
   }
 }
 
@@ -661,6 +944,11 @@ function handleLoginSubmit(programId) {
     user = findUserByPhoneOrId(phoneInput);
   }
 
+  // ولي الأمر: يدخل برقم جواله المسجّل عند أبنائه (حساب مستقل)
+  if (!userSelect && window.parents && state.portalMode !== "staff") {
+    if (window.parents.tryLogin(phoneInput, passInput, user, programId)) return;
+  }
+
   if (!user) {
     alert(
       "بيانات الدخول غير صحيحة. يرجى التأكد من رقم الجوال أو رقم الهوية.",
@@ -668,10 +956,24 @@ function handleLoginSubmit(programId) {
     return;
   }
 
-  if (user.password && user.password !== passInput) {
-    alert("كلمة المرور غير صحيحة!");
+  const lockedMin = loginLockedMinutes(user.id);
+  if (lockedMin > 0) {
+    alert(
+      `تم إيقاف الدخول لهذا الحساب مؤقتاً بسبب محاولات خاطئة متكررة.\nحاول بعد ${lockedMin} دقيقة.`,
+    );
     return;
   }
+
+  if (!checkUserPassword(user, passInput)) {
+    const left = recordLoginFail(user.id);
+    alert(
+      left > 0
+        ? `كلمة المرور غير صحيحة! (متبقٍ ${left} محاولات قبل الإيقاف المؤقت)`
+        : "كلمة المرور غير صحيحة! تم إيقاف الدخول لهذا الحساب 5 دقائق.",
+    );
+    return;
+  }
+  clearLoginFails(user.id);
 
   if (user.isRestricted) {
     alert("عذراً، هذا الحساب مقيد حالياً. يرجى التواصل مع إدارة المنصة.");
@@ -715,6 +1017,13 @@ function handleLoginSubmit(programId) {
   try {
     logAudit("تسجيل دخول", `دخول ${user.role} إلى المنصة`);
   } catch (e) {}
+  // تشفير كلمة مرور هذا الحساب إن كانت ما تزال نصاً واضحاً (والمدير: كل الحسابات)
+  try {
+    if (migrateUserPassword(user)) persist("users");
+    migrateAllPasswordsIfAdmin();
+  } catch (e) {
+    console.warn(e);
+  }
   navigateTo("home");
 }
 
@@ -791,7 +1100,18 @@ function navigateTo(viewName) {
   document.querySelectorAll("#sidebar-nav button").forEach((btn) => {
     btn.classList.remove("nav-item-active");
   });
-  const activeBtn = document.getElementById(`nav-${viewName}`);
+  // القائمة مجمّعة: الصفحة تُظلّل خانتها، وتُحفظ كآخر تبويب مستخدم فيها
+  const navGroup =
+    window.views && window.views.groupOfView
+      ? window.views.groupOfView(viewName)
+      : null;
+  if (navGroup) {
+    if (!state.navLastTab) state.navLastTab = {};
+    state.navLastTab[navGroup.id] = viewName;
+  }
+  const activeBtn = document.getElementById(
+    `nav-${navGroup ? navGroup.id : viewName}`,
+  );
   if (activeBtn) activeBtn.classList.add("nav-item-active");
 
   const contentArea = document.getElementById("app-content");
@@ -801,6 +1121,19 @@ function navigateTo(viewName) {
   if (!state.currentUser && viewName !== "portal") {
     state.currentView = "portal";
     contentArea.innerHTML = window.views.renderPortalView();
+    return;
+  }
+
+  // ولي الأمر: شاشتان فقط (أبنائي، الإعدادات)
+  if (state.currentUser && state.currentUser.role === "parent" && window.parents) {
+    try {
+      contentArea.innerHTML =
+        viewName === "settings"
+          ? window.parents.renderSettings()
+          : window.parents.renderHome();
+    } catch (e) {
+      console.error("خطأ في عرض شاشة ولي الأمر:", e);
+    }
     return;
   }
 
@@ -887,6 +1220,28 @@ function navigateTo(viewName) {
           ? window.views.renderExcusesView()
           : window.views.renderHome(state.currentUser);
         break;
+      case "parents":
+        contentArea.innerHTML =
+          window.parents && state.currentUser.role === "admin"
+            ? window.parents.renderAdminView()
+            : window.views.renderHome(state.currentUser);
+        break;
+      case "content":
+        contentArea.innerHTML = window.content
+          ? window.content.renderView()
+          : window.views.renderHome(state.currentUser);
+        break;
+      case "comms":
+        contentArea.innerHTML = window.comms
+          ? window.comms.renderView()
+          : window.views.renderAnnouncementsView();
+        break;
+      case "grades":
+        contentArea.innerHTML =
+          window.grades && state.currentUser.role !== "student"
+            ? window.grades.renderView()
+            : window.views.renderHome(state.currentUser);
+        break;
       case "my-report":
         contentArea.innerHTML =
           window.views.renderMyReportView && state.currentUser.role === "student"
@@ -898,6 +1253,11 @@ function navigateTo(viewName) {
           ? window.views.renderHome(state.currentUser)
           : window.views.renderPortalView();
         break;
+    }
+    // تبويبات الخانة (مثل: الطلاب | المشرفون | أولياء الأمور)
+    if (navGroup && window.views.renderGroupTabs) {
+      const bar = window.views.renderGroupTabs(viewName);
+      if (bar) contentArea.insertAdjacentHTML("afterbegin", bar);
     }
   } catch (e) {
     console.error("خطأ في عرض الشاشة (" + viewName + "):", e);
@@ -1730,7 +2090,15 @@ function approveProfileEdit(editId) {
       targetUser.fatherPhone = normalizeDigits(req.newFatherPhone);
     if (req.newEmail) targetUser.email = req.newEmail;
     if (req.newName) targetUser.name = req.newName;
-    if (req.newPassword) targetUser.password = req.newPassword;
+    if (req.newPassword) {
+      // الطلب يحمل بصمة كلمة المرور (الطلبات القديمة قد تحمل نصاً واضحاً)
+      if (String(req.newPassword).indexOf(PASS_HASH_PREFIX) === 0) {
+        targetUser.passHash = req.newPassword;
+        delete targetUser.password;
+      } else {
+        setUserPassword(targetUser, req.newPassword);
+      }
+    }
 
     db.notifications.unshift({
       id: makeId("notif"),
@@ -1933,7 +2301,7 @@ function updateStudentData(studentId, data) {
   student.fatherPhone = normalizeDigits(data.fatherPhone || "");
   if (isProgramActive(data.currentProgramId))
     student.currentProgramId = data.currentProgramId;
-  if (data.password) student.password = cleanText(data.password, 60);
+  if (data.password) setUserPassword(student, cleanText(data.password, 60));
 
   persist("users");
   closeModal("edit-student-modal");
@@ -2038,7 +2406,7 @@ function updateSupervisorData(supervisorId, data) {
   if (data.nationalId !== undefined) sup.nationalId = nationalId;
   if (Array.isArray(data.assignedPrograms))
     sup.assignedPrograms = data.assignedPrograms.filter((p) => isProgramActive(p));
-  if (data.password) sup.password = cleanText(data.password, 60);
+  if (data.password) setUserPassword(sup, cleanText(data.password, 60));
 
   // إن كان المستخدم يعدّل بيانات نفسه، حدّث الجلسة والترويسة
   if (state.currentUser && state.currentUser.id === sup.id) {
@@ -2168,7 +2536,7 @@ function updateProfile() {
     me.phone = phone;
     me.email = email;
     if (nationalId) me.nationalId = nationalId;
-    if (newPass) me.password = newPass;
+    if (newPass) setUserPassword(me, newPass);
     const hdr = document.getElementById("header-user-name");
     if (hdr) hdr.innerText = me.name;
     persist("users");
@@ -2193,7 +2561,8 @@ function updateProfile() {
   if (nationalId && nationalId !== me.nationalId)
     request.newNationalId = nationalId;
   if (email && email !== me.email) request.newEmail = email;
-  if (newPass) request.newPassword = newPass;
+  // لا تُحفظ كلمة المرور الجديدة نصاً واضحاً حتى داخل الطلب
+  if (newPass) request.newPassword = passwordHashFor(me.id, newPass);
 
   if (
     !request.newName &&
@@ -2477,7 +2846,9 @@ function addNewAnnouncement(data) {
   persist("announcements");
   closeModal("add-announcement-modal");
   alert("تم نشر الإعلان بنجاح.");
-  navigateTo("announcements");
+  // بعد نشر إعلان: العودة لتبويب الإعلانات داخل "التواصل"
+  state.commsTab = "announcements";
+  navigateTo(window.comms ? "comms" : "announcements");
 }
 
 // ===== مراجعة يوم محدد (المدير فقط) =====

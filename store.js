@@ -33,7 +33,24 @@ window.store = (function () {
     "auditLog",
     "taskEvaluations",
     "appSettings",
+    "gradeTotals",
+    "gradeLog",
+    "messages",
+    "warnings",
+    "contentItems",
+    "parents",
   ];
+
+  // مجموعات تُحفظ بالدمج (معاملة): لا يمسح جهازٌ ما أضافه جهاز آخر في نفس اللحظة.
+  // لكل عنصر updatedAt، والأحدث يفوز. max = أقصى عدد يُبقى (الأحدث أولاً).
+  const MERGE_PUSH = {
+    gradeTotals: {},
+    gradeLog: { max: 1500 },
+    messages: { max: 1000 },
+    warnings: { max: 3000 },
+    contentItems: {},
+    parents: {},
+  };
 
   let fs = null;
   let onChangeCb = null;
@@ -63,16 +80,49 @@ window.store = (function () {
   }
 
   function saveLocal() {
+    let snap;
+    let raw;
     try {
-      const snap = snapshotOfDb();
-      localStorage.setItem(LS_KEY, JSON.stringify(snap));
-      rotateBackup(snap);
+      snap = snapshotOfDb();
+      raw = JSON.stringify(snap);
+      localStorage.setItem(LS_KEY, raw);
     } catch (e) {
-      console.warn("تعذر الحفظ المحلي:", e);
+      // امتلأت مساحة الجهاز: النسخة الأساسية أهم من النسخ الاحتياطية المحلية،
+      // فنحذف أقدم النسخ الاحتياطية ونعيد المحاولة.
+      if (!raw || !freeBackupSpace(() => localStorage.setItem(LS_KEY, raw))) {
+        console.warn("تعذر الحفظ المحلي:", e);
+        return;
+      }
     }
+    rotateBackup(snap, raw.length);
   }
 
-  function rotateBackup(snap) {
+  // يحذف أقدم النسخ الاحتياطية المحلية واحدة واحدة حتى تنجح العملية retry
+  function freeBackupSpace(retry) {
+    let baks = [];
+    try {
+      baks = JSON.parse(localStorage.getItem(BAK_KEY) || "[]");
+    } catch (e) {
+      baks = [];
+    }
+    while (baks.length) {
+      baks.shift();
+      try {
+        if (baks.length) localStorage.setItem(BAK_KEY, JSON.stringify(baks));
+        else localStorage.removeItem(BAK_KEY);
+        retry();
+        return true;
+      } catch (e) {
+        /* نكمل الحذف */
+      }
+    }
+    return false;
+  }
+
+  // ميزانية النسخ الاحتياطية المحلية (مساحة المتصفح ~5 ميجا للموقع كله)
+  const BAK_BUDGET_CHARS = 2400000;
+
+  function rotateBackup(snap, snapChars) {
     try {
       let baks = [];
       try {
@@ -89,7 +139,11 @@ window.store = (function () {
         Date.now() - (last.ts || 0) > 3600000
       ) {
         baks.push({ ts: Date.now(), users: users, data: snap });
-        while (baks.length > MAX_BAKS) baks.shift();
+        // عدد النسخ يتكيّف مع حجم البيانات حتى لا تزاحم النسخة الأساسية
+        const perCopy = Math.max(1, snapChars || 1);
+        const fit = Math.max(1, Math.floor(BAK_BUDGET_CHARS / perCopy));
+        const keep = Math.min(MAX_BAKS, fit);
+        while (baks.length > keep) baks.shift();
         localStorage.setItem(BAK_KEY, JSON.stringify(baks));
       }
     } catch (e) {
@@ -156,6 +210,10 @@ window.store = (function () {
     // حسابات المستخدمين: كتابة عبر معاملة تدمج مع السحابة (لا تُفقد أي إضافة من جهاز آخر)
     if (name === "users" && !opts.force) {
       pushUsersMerged();
+      return;
+    }
+    if (MERGE_PUSH[name] && !opts.force) {
+      pushNewerMerged(name, MERGE_PUSH[name]);
       return;
     }
 
@@ -239,6 +297,56 @@ window.store = (function () {
       })
       .catch((e) =>
         console.warn("تعذر حفظ حسابات المستخدمين:", e && e.code),
+      );
+  }
+
+  // دمج "الأحدث يفوز" لكل عنصر بحسب updatedAt
+  function mergeNewer(baseArr, overArr, max) {
+    const map = new Map();
+    (baseArr || []).forEach((x) => {
+      const k = itemKey(x);
+      if (k) map.set(k, x);
+    });
+    (overArr || []).forEach((x) => {
+      const k = itemKey(x);
+      if (!k) return;
+      const cur = map.get(k);
+      if (!cur || (x.updatedAt || 0) >= (cur.updatedAt || 0)) map.set(k, x);
+    });
+    let out = Array.from(map.values());
+    if (max && out.length > max) {
+      out = out
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, max);
+    }
+    return out;
+  }
+
+  function pushNewerMerged(name, cfg) {
+    const localArr = (window.db[name] || []).slice();
+    fs.runTransaction(async (tx) => {
+      const snap = await tx.get(docRef(name));
+      const cloudArr =
+        snap.exists && Array.isArray(snap.data().items) ? snap.data().items : [];
+      const merged = mergeNewer(cloudArr, localArr, cfg.max);
+      tx.set(docRef(name), { items: merged, updatedAt: Date.now() });
+      return merged;
+    })
+      .then((merged) => {
+        // ما تغيّر محلياً أثناء الحفظ يبقى (الأحدث يفوز)
+        window.db[name] = mergeNewer(merged, window.db[name], cfg.max);
+        remoteCount[name] = merged.length;
+        try {
+          localStorage.setItem(LS_KEY, JSON.stringify(snapshotOfDb()));
+        } catch (e) {}
+        try {
+          window.dispatchEvent(
+            new CustomEvent("totin:cloud-saved", { detail: { name } }),
+          );
+        } catch (e) {}
+      })
+      .catch((e) =>
+        console.warn("تعذر الحفظ السحابي (" + name + "):", e && e.code),
       );
   }
 

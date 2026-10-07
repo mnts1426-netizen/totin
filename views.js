@@ -10,201 +10,126 @@
 
 window.views = {
   // 1. القائمة الجانبية الموجهة بالصلاحيات مع إضافة رابط التحضير السريع
+  // تعريف القائمة الجانبية: كل خانة قد تضم عدة صفحات تظهر كتبويبات أعلى الصفحة
+  navGroupsFor(role) {
+    const g = (id, icon, color, label, tabs) => ({ id, icon, color, label, tabs });
+    const t = (view, label) => ({ view, label });
+    if (role === "admin") {
+      return [
+        g("home", "fa-house", "#D4A359", "الرئيسية", [t("home", "الرئيسية")]),
+        g("accounts", "fa-users", "#D4A359", "الحسابات", [
+          t("students", "الطلاب والبطاقات"),
+          t("supervisors", "المشرفون والإداريون"),
+          t("parents", "أولياء الأمور"),
+        ]),
+        g("att", "fa-clipboard-user", "#9E1B48", "الحضور", [
+          t("quick-attendance", "التحضير السريع"),
+          t("attendance", "سجلات التحضير"),
+          t("day-review", "مراجعة يوم"),
+          t("excuses", "الاستئذانات"),
+        ]),
+        g("work", "fa-list-check", "#8AA838", "الجدول والمهام", [
+          t("schedule", "الجدول والعمليات"),
+          t("tasks", "المهام والتكليفات"),
+          t("content", "الدروس والتكاليف"),
+        ]),
+        g("grades", "fa-star-half-stroke", "#8AA838", "الدرجات", [t("grades", "الدرجات")]),
+        g("comms", "fa-comments", "#E59824", "التواصل", [t("comms", "التواصل")]),
+        g("settings", "fa-gear", "#64748B", "الإعدادات", [
+          t("settings", "الإعدادات"),
+          t("schedule-manage", "الجلسات"),
+          t("term-manage", "الفصل الدراسي"),
+          t("audit-log", "سجل العمليات"),
+        ]),
+      ];
+    }
+    if (role === "supervisor") {
+      return [
+        g("home", "fa-chart-line", "#D4A359", "لوحة المتابعة", [t("home", "لوحة المتابعة")]),
+        g("att", "fa-clipboard-user", "#9E1B48", "الحضور", [
+          t("quick-attendance", "التحضير السريع"),
+          t("attendance", "رصد الحضور"),
+          t("excuses", "الاستئذانات"),
+        ]),
+        g("work", "fa-list-check", "#8AA838", "الجدول والمهام", [
+          t("schedule", "الجدول الأسبوعي"),
+          t("tasks", "مهامي المباشرة"),
+          t("content", "الدروس والتكاليف"),
+        ]),
+        g("students", "fa-user-graduate", "#D4A359", "طلابي والبطاقات", [t("students", "طلابي والبطاقات")]),
+        g("grades", "fa-star-half-stroke", "#8AA838", "الدرجات", [t("grades", "الدرجات")]),
+        g("comms", "fa-comments", "#E59824", "التواصل", [t("comms", "التواصل")]),
+        g("settings", "fa-gear", "#64748B", "الإعدادات", [t("settings", "الإعدادات")]),
+      ];
+    }
+    if (role === "parent") {
+      return [
+        g("home", "fa-children", "#D4A359", "أبنائي", [t("home", "أبنائي")]),
+        g("settings", "fa-gear", "#64748B", "الإعدادات", [t("settings", "الإعدادات")]),
+      ];
+    }
+    // الطالب
+    return [
+      g("home", "fa-house", "#D4A359", "الرئيسية والبرنامج", [t("home", "الرئيسية")]),
+      g("my-report", "fa-chart-simple", "#9E1B48", "تقريري", [t("my-report", "تقريري")]),
+      g("work", "fa-list-check", "#8AA838", "جدولي ومهامي", [
+        t("schedule", "جدولي الدراسي"),
+        t("tasks", "مهامي وواجباتي"),
+        t("content", "دروسي وتكاليفي"),
+      ]),
+      g("comms", "fa-comments", "#E59824", "التواصل", [t("comms", "التواصل")]),
+      g("settings", "fa-gear", "#64748B", "الإعدادات", [t("settings", "الإعدادات")]),
+    ];
+  },
+
+  // الخانة التي تنتمي لها صفحة (للتظليل والتبويبات)
+  groupOfView(viewName) {
+    const groups = this._navGroups || [];
+    return groups.find((grp) => grp.tabs.some((x) => x.view === viewName)) || null;
+  },
+
+  // فتح خانة: آخر تبويب استُخدم فيها، أو أول تبويب
+  openNavGroup(groupId) {
+    const grp = (this._navGroups || []).find((x) => x.id === groupId);
+    if (!grp) return;
+    const last = (state.navLastTab || {})[groupId];
+    const view = grp.tabs.some((x) => x.view === last) ? last : grp.tabs[0].view;
+    navigateTo(view);
+  },
+
+  // شريط التبويبات أعلى الصفحة (فقط للخانات التي تضم أكثر من صفحة)
+  renderGroupTabs(viewName) {
+    const grp = this.groupOfView(viewName);
+    if (!grp || grp.tabs.length < 2) return "";
+    return `
+      <div class="mb-4 bg-white rounded-3xl border border-slate-200 shadow-sm p-1.5 flex gap-1.5 overflow-x-auto">
+        ${grp.tabs
+          .map(
+            (x) => `
+          <button onclick="navigateTo('${x.view}')" class="flex-1 min-w-max px-3.5 py-2 rounded-2xl text-xs sm:text-sm font-black transition ${
+            x.view === viewName ? "bg-[#0B2533] text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+          }">${escHtml(x.label)}</button>`,
+          )
+          .join("")}
+      </div>`;
+  },
+
   renderSidebar(role) {
     const nav = document.getElementById("sidebar-nav");
     if (!nav) return;
 
-    let links = [];
-
-    if (role === "admin") {
-      links = [
-        { id: "home", icon: "fa-house", color: "#D4A359", label: "الرئيسية" },
-        {
-          id: "quick-attendance",
-          icon: "fa-qrcode",
-          color: "#169BA2",
-          label: "التحضير السريع (باركود)",
-        },
-        {
-          id: "schedule",
-          icon: "fa-calendar-week",
-          color: "#169BA2",
-          label: "الجدول والعمليات",
-        },
-        {
-          id: "tasks",
-          icon: "fa-list-check",
-          color: "#8AA838",
-          label: "المهام والتكليفات",
-        },
-        {
-          id: "students",
-          icon: "fa-user-graduate",
-          color: "#D4A359",
-          label: "إدارة الطلاب والبطاقات",
-        },
-        {
-          id: "supervisors",
-          icon: "fa-user-tie",
-          color: "#E59824",
-          label: "المشرفون والإداريون",
-        },
-        {
-          id: "attendance",
-          icon: "fa-clipboard-user",
-          color: "#9E1B48",
-          label: "سجلات التحضير",
-        },
-        {
-          id: "day-review",
-          icon: "fa-calendar-day",
-          color: "#0B2533",
-          label: "مراجعة يوم محدد",
-        },
-        {
-          id: "schedule-manage",
-          icon: "fa-calendar-plus",
-          color: "#169BA2",
-          label: "إدارة الجلسات",
-        },
-        {
-          id: "excuses",
-          icon: "fa-file-circle-check",
-          color: "#8AA838",
-          label: "الاستئذانات",
-        },
-        {
-          id: "term-manage",
-          icon: "fa-graduation-cap",
-          color: "#9E1B48",
-          label: "الفصل الدراسي",
-        },
-        {
-          id: "audit-log",
-          icon: "fa-clock-rotate-left",
-          color: "#64748B",
-          label: "سجل العمليات",
-        },
-        {
-          id: "announcements",
-          icon: "fa-bullhorn",
-          color: "#E59824",
-          label: "لوحة الإعلانات",
-        },
-        {
-          id: "settings",
-          icon: "fa-gear",
-          color: "#64748B",
-          label: "الإعدادات",
-        },
-      ];
-    } else if (role === "supervisor") {
-      links = [
-        {
-          id: "home",
-          icon: "fa-chart-line",
-          color: "#D4A359",
-          label: "لوحة المتابعة",
-        },
-        {
-          id: "quick-attendance",
-          icon: "fa-qrcode",
-          color: "#169BA2",
-          label: "التحضير السريع (باركود)",
-        },
-        {
-          id: "schedule",
-          icon: "fa-calendar-week",
-          color: "#169BA2",
-          label: "الجدول الأسبوعي",
-        },
-        {
-          id: "tasks",
-          icon: "fa-tasks",
-          color: "#8AA838",
-          label: "مهامي المباشرة",
-        },
-        {
-          id: "students",
-          icon: "fa-user-graduate",
-          color: "#D4A359",
-          label: "طلابي والبطاقات",
-        },
-        {
-          id: "attendance",
-          icon: "fa-clipboard-user",
-          color: "#9E1B48",
-          label: "رصد الحضور",
-        },
-        {
-          id: "excuses",
-          icon: "fa-file-circle-check",
-          color: "#8AA838",
-          label: "الاستئذانات",
-        },
-        {
-          id: "announcements",
-          icon: "fa-bullhorn",
-          color: "#E59824",
-          label: "لوحة الإعلانات",
-        },
-        {
-          id: "settings",
-          icon: "fa-gear",
-          color: "#64748B",
-          label: "الإعدادات",
-        },
-      ];
-    } else {
-      // student
-      links = [
-        {
-          id: "home",
-          icon: "fa-house",
-          color: "#D4A359",
-          label: "الرئيسية والبرنامج",
-        },
-        {
-          id: "my-report",
-          icon: "fa-chart-simple",
-          color: "#9E1B48",
-          label: "تقريري",
-        },
-        {
-          id: "schedule",
-          icon: "fa-calendar-days",
-          color: "#169BA2",
-          label: "جدولي الدراسي",
-        },
-        {
-          id: "tasks",
-          icon: "fa-list-check",
-          color: "#8AA838",
-          label: "مهامي وواجباتي",
-        },
-        {
-          id: "announcements",
-          icon: "fa-bullhorn",
-          color: "#E59824",
-          label: "لوحة الإعلانات",
-        },
-        {
-          id: "settings",
-          icon: "fa-gear",
-          color: "#64748B",
-          label: "الإعدادات",
-        },
-      ];
-    }
+    const groups = this.navGroupsFor(role);
+    this._navGroups = groups;
 
     nav.innerHTML = `
             <div class="space-y-1">
-                ${links
+                ${groups
                   .map(
-                    (link) => `
-                    <button onclick="navigateTo('${link.id}')" id="nav-${link.id}" class="nav-item w-full flex items-center space-x-3 space-x-reverse px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 transition">
-                        <i class="fa-solid ${link.icon} w-5 text-center text-sm" style="color: ${link.color};"></i>
-                        <span>${link.label}</span>
+                    (grp) => `
+                    <button onclick="views.openNavGroup('${grp.id}')" id="nav-${grp.id}" class="nav-item w-full flex items-center space-x-3 space-x-reverse px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 transition">
+                        <i class="fa-solid ${grp.icon} w-5 text-center text-sm" style="color: ${grp.color};"></i>
+                        <span class="flex-1 text-right">${grp.label}</span>
+                        ${grp.tabs.length > 1 ? `<span class="text-[10px] text-slate-400 font-bold">${grp.tabs.length}</span>` : ""}
                     </button>
                 `,
                   )
@@ -336,7 +261,7 @@ window.views = {
 
                         <div>
                             <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
-                            <input id="login-pass" type="password" value="1234" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                            <input id="login-pass" type="password" autocomplete="current-password" placeholder="اكتب كلمة المرور" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                         </div>
 
                         <div class="pt-2">
@@ -359,7 +284,11 @@ window.views = {
       const phoneInput = document.getElementById("login-phone");
       const passInput = document.getElementById("login-pass");
       if (phoneInput) phoneInput.value = user.phone;
-      if (passInput) passInput.value = user.password || "1234";
+      // لا تُعبّأ كلمة المرور تلقائياً أبداً: يكتبها صاحب الحساب بنفسه
+      if (passInput) {
+        passInput.value = "";
+        passInput.focus();
+      }
     }
   },
 
@@ -2132,8 +2061,8 @@ window.views = {
                         </div>
 
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
-                            <input id="edit-stu-pass" value="${student.password || "1234"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                            <label class="block font-bold text-slate-700 mb-1">كلمة مرور جديدة (اختياري):</label>
+                            <input id="edit-stu-pass" type="password" autocomplete="new-password" value="" placeholder="اتركها فارغة للإبقاء على الحالية" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                         </div>
 
                         <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
@@ -2563,8 +2492,8 @@ window.views = {
                             </div>
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
-                            <input id="edit-sup-pass" value="${sup.password || "1234"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                            <label class="block font-bold text-slate-700 mb-1">كلمة مرور جديدة (اختياري):</label>
+                            <input id="edit-sup-pass" type="password" autocomplete="new-password" value="" placeholder="اتركها فارغة للإبقاء على الحالية" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                         </div>
                         <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
                             <button type="button" onclick="closeModal('edit-supervisor-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
@@ -2667,8 +2596,8 @@ window.views = {
                             </div>
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">كلمة المرور:</label>
-                            <input id="edit-adm-pass" value="${adm.password || "1234"}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#9E1B48]">
+                            <label class="block font-bold text-slate-700 mb-1">كلمة مرور جديدة (اختياري):</label>
+                            <input id="edit-adm-pass" type="password" autocomplete="new-password" value="" placeholder="اتركها فارغة للإبقاء على الحالية" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#9E1B48]">
                         </div>
                         <div class="pt-2 flex justify-end space-x-2 space-x-reverse">
                             <button type="button" onclick="closeModal('edit-admin-modal')" class="px-3 py-1.5 bg-slate-100 font-bold text-slate-600 rounded-xl">إلغاء</button>
@@ -2900,7 +2829,7 @@ window.views = {
 
                     <div class="bg-amber-50/60 border border-amber-200 rounded-xl p-3">
                         <label class="block font-bold text-[#0B2533] mb-1"><i class="fa-solid fa-key text-[#D4A359] ml-1"></i> تغيير كلمة المرور:</label>
-                        <input id="set-user-pass" type="text" placeholder="اترك الحقل فارغاً لعدم التغيير" class="w-full bg-white border border-amber-300 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
+                        <input id="set-user-pass" type="password" autocomplete="new-password" placeholder="اترك الحقل فارغاً لعدم التغيير" class="w-full bg-white border border-amber-300 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                         ${
                           needsApproval
                             ? `<p class="text-[10px] text-amber-800 mt-1">تغيير كلمة المرور أو البيانات يحتاج <b>اعتماد المدير</b>.</p>`
@@ -2928,6 +2857,14 @@ window.views = {
       <div class="max-w-xl mt-6 pt-5 border-t border-slate-200 space-y-3 text-xs">
         <h3 class="text-sm font-black text-[#0B2533]"><i class="fa-solid fa-shield-halved text-[#9E1B48] ml-1.5"></i> النسخ الاحتياطي والاستعادة</h3>
         <p class="text-[11px] text-slate-500">عدد الطلاب الحاليّ: <b>${usersNow}</b>. احتفظ بنسخة Excel دورياً كأمان إضافي.</p>
+
+        <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900">
+          <i class="fa-solid fa-hourglass-half mt-0.5 text-amber-600"></i>
+          <div class="leading-relaxed">
+            <div class="font-black mb-0.5">قريباً: النسخ الاحتياطي التلقائي بملف Excel</div>
+            <div class="text-[11px]">نسخة كاملة تُحفظ تلقائياً خارج المنصة في الوقت الذي يحدده المدير، مع إمكانية إرجاعها للمنصة بسهولة. الميزة مؤجّلة حالياً وستُفعّل لاحقاً، وأدوات النسخ الحالية أدناه تعمل كالمعتاد.</div>
+          </div>
+        </div>
 
         <div class="flex flex-wrap gap-2">
           <button onclick="views.doExport()" class="px-3 py-1.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl">
@@ -4010,6 +3947,10 @@ window.views = {
           ${statBox("انضباط هذا الشهر", month, "#D4A359")}
           ${statBox("انضباط الفصل كامل", all, "#9E1B48")}
         </div>
+
+        ${window.grades ? window.grades.renderStudentCard(u.id) : ""}
+
+        ${window.comms ? window.comms.renderStudentWarningsCard(u.id) : ""}
 
         <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5">
           <h3 class="font-black text-[#0B2533] text-sm mb-2"><i class="fa-solid fa-list-check text-[#D4A359] ml-1.5"></i> واجباتي (${doneTasks.length}/${myTasks.length} مكتملة)</h3>
