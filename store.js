@@ -39,6 +39,8 @@ window.store = (function () {
     "warnings",
     "contentItems",
     "parents",
+    "programs",
+    "levels",
   ];
 
   // مجموعات تُحفظ بالدمج (معاملة): لا يمسح جهازٌ ما أضافه جهاز آخر في نفس اللحظة.
@@ -50,6 +52,8 @@ window.store = (function () {
     warnings: { max: 3000 },
     contentItems: {},
     parents: {},
+    programs: {},
+    levels: {},
   };
 
   let fs = null;

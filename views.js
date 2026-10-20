@@ -37,6 +37,7 @@ window.views = {
         g("comms", "fa-comments", "#E59824", "التواصل", [t("comms", "التواصل")]),
         g("settings", "fa-gear", "#64748B", "الإعدادات", [
           t("settings", "الإعدادات"),
+          t("programs-manage", "البرامج"),
           t("schedule-manage", "الجلسات"),
           t("term-manage", "الفصل الدراسي"),
           t("audit-log", "سجل العمليات"),
@@ -150,8 +151,8 @@ window.views = {
     // في رابط الطلاب الخاص ببرنامج محدد لا يُعرض إلا ذلك البرنامج، وفي غيره تُعرض كل البرامج
     const visiblePrograms =
       state.portalMode === "student" && state.lockedProgramId
-        ? db.programs.filter((p) => p.id === state.lockedProgramId)
-        : db.programs;
+        ? getListedPrograms().filter((p) => p.id === state.lockedProgramId)
+        : getListedPrograms();
 
     const modeNote =
       state.portalMode === "staff"
@@ -1691,9 +1692,6 @@ window.views = {
                                 </button>
                                 <button onclick="views.openEditStudentModal('${st.id}')" class="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold transition hover:bg-slate-200">
                                     <i class="fa-solid fa-pen-to-square"></i>
-                                </button>
-                                <button onclick="promoteStudent('${st.id}')" class="px-2 py-1 bg-amber-50 text-[#D4A359] border border-amber-200/60 rounded-xl text-[10px] font-bold transition hover:bg-amber-100">
-                                    ترقية
                                 </button>
                                 <button onclick="toggleUserRestriction('${st.id}')" class="px-2 py-1 ${st.isRestricted ? "bg-emerald-100 text-emerald-800" : "bg-rose-50 text-rose-700"} rounded-xl text-[10px] font-bold transition">
                                     ${st.isRestricted ? "فك" : "تقييد"}

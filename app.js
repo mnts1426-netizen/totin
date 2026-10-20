@@ -30,12 +30,17 @@ const state = {
 
 // البرامج المفعّلة فقط (أي برنامج بلا isClosed:true يُعتبر مفعّلاً)
 function getActivePrograms() {
-  return (window.db.programs || []).filter((p) => !p.isClosed);
+  return (window.db.programs || []).filter((p) => p && !p.isClosed && !p.deleted);
+}
+
+// كل البرامج غير المحذوفة (المفتوحة والمغلقة) — المحذوف يبقى مخفياً للحفاظ على السجلات القديمة
+function getListedPrograms() {
+  return (window.db.programs || []).filter((p) => p && !p.deleted);
 }
 
 function isProgramActive(programId) {
   const p = (window.db.programs || []).find((x) => x.id === programId);
-  return Boolean(p && !p.isClosed);
+  return Boolean(p && !p.isClosed && !p.deleted);
 }
 
 function firstActiveProgramId() {
@@ -532,7 +537,7 @@ function applyAccessLinkParams() {
       state.lockedProgramId = null;
     } else if (view === "student" || prog) {
       state.portalMode = "student";
-      const match = (window.db.programs || []).find(
+      const match = getListedPrograms().find(
         (p) => p.id === prog || p.name === prog,
       );
       state.lockedProgramId = match ? match.id : null;
@@ -1219,6 +1224,12 @@ function navigateTo(viewName) {
         contentArea.innerHTML = window.views.renderExcusesView
           ? window.views.renderExcusesView()
           : window.views.renderHome(state.currentUser);
+        break;
+      case "programs-manage":
+        contentArea.innerHTML =
+          window.programsAdmin && state.currentUser.role === "admin"
+            ? window.programsAdmin.renderView()
+            : window.views.renderHome(state.currentUser);
         break;
       case "parents":
         contentArea.innerHTML =
