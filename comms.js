@@ -55,15 +55,11 @@ window.comms = (function () {
   }
 
   function notify(userId, category, title, message) {
-    if (!Array.isArray(db.notifications)) db.notifications = [];
-    db.notifications.unshift({
-      id: makeUniqueId("notif"),
+    pushNotification({
       userId,
       category,
       title: cleanText(title, 150),
       message: cleanText(message, 300),
-      date: "الآن",
-      isRead: false,
     });
   }
 

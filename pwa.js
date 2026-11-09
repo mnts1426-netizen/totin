@@ -112,6 +112,128 @@ window.installAppAndEnableNotifications = async function () {
 // أسماء بديلة للتوافق
 window.triggerAppInstallAndNotify = window.installAppAndEnableNotifications;
 
+// =====================================================================
+// التثبيت والإشعارات منفصلان (من الإعدادات)
+// =====================================================================
+function refreshAppStateUi() {
+  try {
+    window.dispatchEvent(new CustomEvent("totin:app-state"));
+  } catch (e) {}
+}
+window.addEventListener("beforeinstallprompt", refreshAppStateUi);
+window.addEventListener("appinstalled", refreshAppStateUi);
+
+window.isAppInstalled = isAppInstalled;
+window.canPromptInstall = function () {
+  return Boolean(deferredInstallPrompt);
+};
+window.isIOSDevice = function () {
+  return (
+    /iphone|ipad|ipod/i.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+};
+
+// حالة الإشعارات على هذا الجهاز: granted | denied | default | unsupported
+window.notificationState = function () {
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) return "unsupported";
+  return Notification.permission;
+};
+
+// تثبيت التطبيق فقط
+window.installAppOnly = async function () {
+  if (isAppInstalled()) {
+    alert("التطبيق مثبّت على هذا الجهاز ✓");
+    return;
+  }
+  if (deferredInstallPrompt) {
+    try {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+    } catch (e) {
+      console.warn("تعذر عرض نافذة التثبيت:", e);
+    }
+    deferredInstallPrompt = null;
+    refreshAppStateUi();
+    return;
+  }
+  if (window.isIOSDevice()) {
+    alert(
+      "لتثبيت التطبيق على الآيفون:\n" +
+        "١) افتح المنصة في متصفح Safari\n" +
+        "٢) اضغط زر المشاركة (مربع وسهم للأعلى)\n" +
+        "٣) اختر «إضافة إلى الشاشة الرئيسية»\n" +
+        "٤) افتح المنصة بعدها من الأيقونة الجديدة",
+    );
+  } else {
+    alert(
+      "لتثبيت التطبيق: افتح قائمة المتصفح (⋮) واختر «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية».\n" +
+        "إن لم يظهر الخيار فافتح الرابط في متصفح Chrome (وليس من داخل الواتساب).",
+    );
+  }
+};
+
+// تفعيل الإشعارات فقط
+window.enableNotificationsOnly = async function () {
+  const st = window.notificationState();
+  if (st === "unsupported") {
+    alert(
+      window.isIOSDevice() && !isAppInstalled()
+        ? "على الآيفون: ثبّت التطبيق أولاً (إضافة إلى الشاشة الرئيسية) ثم افتحه من الأيقونة وفعّل الإشعارات."
+        : "متصفح جهازك لا يدعم الإشعارات. جرّب متصفح Chrome.",
+    );
+    return;
+  }
+  try {
+    let permission = Notification.permission;
+    if (permission === "default") permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      if (window.pushReg && typeof state !== "undefined" && state.currentUser) {
+        await window.pushReg.register(state.currentUser);
+      }
+      await window.showLocalNotification(
+        "المنصة الالكترونية",
+        "تم تفعيل الإشعارات على هذا الجهاز بنجاح.",
+        "notif-enabled",
+      );
+      alert("✅ تم تفعيل الإشعارات.");
+    } else if (permission === "denied") {
+      alert(
+        "الإشعارات محظورة لهذا الموقع من إعدادات المتصفح.\n" +
+          "لتفعيلها: اضغط رمز القفل بجانب الرابط ← الإشعارات ← سماح، ثم أعد المحاولة.",
+      );
+    }
+  } catch (e) {
+    console.error("خطأ أثناء تفعيل الإشعارات:", e);
+  }
+  refreshAppStateUi();
+};
+
+// إشعار تجريبي: يُحفظ كإشعار حقيقي لصاحب الحساب فيمر بنفس طريق الإرسال للجوال
+window.sendTestNotification = function () {
+  if (typeof state === "undefined" || !state.currentUser) return;
+  if (window.notificationState() !== "granted") {
+    alert("فعّل الإشعارات أولاً من الزر بالأعلى.");
+    return;
+  }
+  const id = makeUniqueId("notif_test");
+  if (!Array.isArray(window.db.notifications)) window.db.notifications = [];
+  window.db.notifications.unshift({
+    id,
+    userId: state.currentUser.id,
+    category: "إشعار تجريبي",
+    title: "إشعار تجريبي ✓",
+    message: "إذا وصلك هذا الإشعار فالإشعارات تعمل على جهازك. جرّب أيضاً وأنت خارج التطبيق.",
+    date: "الآن",
+    isRead: false,
+  });
+  if (window.__seenNotifIds) window.__seenNotifIds.add(id);
+  persist("notifications");
+  window.showLocalNotification("إشعار تجريبي ✓", "الإشعارات تعمل على هذا الجهاز.", id);
+  if (typeof updateNotificationsBadge === "function") updateNotificationsBadge();
+  alert("تم إرسال إشعار تجريبي. إن لم يظهر لك، تأكد أن الإشعارات غير مكتومة في إعدادات الجوال.");
+};
+
 // عرض إشعار فوري فعلي (تنبيه نظام) - يُستخدم عند وصول إشعار جديد للمستخدم الحالي
 // أثناء فتح التطبيق (ولو في تبويب/خلفية). أما والتطبيق مغلق تماماً فيتولاها
 // FCM عبر push.js و functions/index.js (نفس الوسم tag فلا يتكرر الإشعار).

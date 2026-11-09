@@ -2,7 +2,7 @@
  * parents.js - حساب ولي الأمر
  *
  *  - يدخل ولي الأمر برقم جواله المسجّل كـ"جوال ولي الأمر" عند أبنائه.
- *  - كلمة المرور الأولى = آخر 3 أرقام من جواله، ويُلزَم بتغييرها عند أول دخول،
+ *  - كلمة المرور الأولى = 0000، ويُلزَم بتغييرها عند أول دخول،
  *    ويستطيع تغييرها لاحقاً من الإعدادات (مباشرة دون اعتماد).
  *  - يرى لكل ابن: الحضور، الدرجات، الإنذارات، الدروس والتكاليف.
  *  - الحسابات في قائمة مستقلة db.parents (لا تختلط بالطلاب والمشرفين، ولا تؤثر
@@ -17,8 +17,9 @@ window.parents = (function () {
   function digitsOf(v) {
     return normalizeDigits(v).replace(/\D/g, "");
   }
-  function defaultPassword(phoneDigits) {
-    return phoneDigits.slice(-3);
+  // كلمة المرور الأولى لكل أولياء الأمور (بطلب الإدارة)
+  function defaultPassword() {
+    return "0000";
   }
   function allParents() {
     if (!Array.isArray(db.parents)) db.parents = [];
@@ -62,11 +63,6 @@ window.parents = (function () {
       return true;
     }
 
-    if (phone.length < 3) {
-      alert("رقم جوال ولي الأمر غير مكتمل في بيانات الطالب. تواصل مع إدارة المنصة.");
-      return true;
-    }
-
     const ok = existing
       ? checkUserPassword(existing, passInput)
       : passInput === defaultPassword(phone);
@@ -77,7 +73,7 @@ window.parents = (function () {
       alert(
         left > 0
           ? `كلمة المرور غير صحيحة! (متبقٍ ${left} محاولات قبل الإيقاف المؤقت)` +
-              (existing ? "" : "\nكلمة المرور الأولى لولي الأمر: آخر 3 أرقام من رقم جواله.")
+              (existing ? "" : "\nكلمة المرور الأولى لولي الأمر: 0000")
           : "كلمة المرور غير صحيحة! تم إيقاف الدخول 5 دقائق.",
       );
       return true;
@@ -123,13 +119,16 @@ window.parents = (function () {
   // نافذة إلزامية لتغيير كلمة المرور الأولى (لا تُغلق قبل التغيير)
   function openForceChange() {
     closeModal("parent-force-pass-modal");
+    // نتحقق لحظة الفتح (قد تكون كلمة المرور تغيّرت أو خرج المستخدم)
+    const me = state.currentUser;
+    if (!me || me.role !== "parent" || !me.mustChangePassword) return;
     const html = `
       <div id="parent-force-pass-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[70] flex justify-center items-center p-4">
         <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full overflow-hidden border-t-4 border-t-[#D4A359]">
           <div class="bg-[#0B2533] text-white p-5">
             <div class="text-[10px] text-[#D4A359] font-bold">خطوة أخيرة لحماية حسابك</div>
             <h3 class="font-black text-base">اختر كلمة مرور جديدة</h3>
-            <p class="text-[11px] text-slate-300 mt-1">كلمة المرور الحالية (آخر 3 أرقام من جوالك) مؤقتة ويسهل تخمينها.</p>
+            <p class="text-[11px] text-slate-300 mt-1">كلمة المرور الحالية (0000) مؤقتة ويسهل تخمينها.</p>
           </div>
           <div class="p-5 space-y-3 text-xs">
             <input id="pf-pass1" type="password" autocomplete="new-password" placeholder="كلمة المرور الجديدة (4 أحرف أو أرقام على الأقل)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800">
@@ -155,7 +154,7 @@ window.parents = (function () {
       return;
     }
     if (p1 === defaultPassword(me.phone)) {
-      alert("اختر كلمة مرور مختلفة عن آخر 3 أرقام من جوالك.");
+      alert("اختر كلمة مرور مختلفة عن 0000.");
       return;
     }
     setUserPassword(me, cleanText(p1, 60));
@@ -242,7 +241,7 @@ window.parents = (function () {
         }
         <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
           <div class="text-xs text-slate-600"><i class="fa-solid fa-bell text-[#D4A359] ml-1"></i> فعّل الإشعارات ليصلك أي إنذار لابنك فوراً.</div>
-          <button onclick="views.installAppAndNotify()" class="js-install-notify-btn px-4 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white text-xs font-black rounded-xl transition">تثبيت التطبيق وتفعيل الإشعارات</button>
+          <button onclick="navigateTo('settings')" class="px-4 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white text-xs font-black rounded-xl transition">الإعدادات ← التطبيق والإشعارات</button>
         </div>
       </div>`;
   }
@@ -256,6 +255,7 @@ window.parents = (function () {
     const me = state.currentUser;
     return `
       <div class="max-w-md space-y-4">
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5">${views.renderAppSection()}</div>
         <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-3 text-xs">
           <h3 class="font-black text-[#0B2533] text-sm"><i class="fa-solid fa-user ml-1.5 text-[#D4A359]"></i> حسابي</h3>
           <div class="flex justify-between border-b border-slate-100 pb-2"><span class="text-slate-500">الاسم</span><span class="font-bold">${escHtml(me.name)}</span></div>
@@ -295,7 +295,7 @@ window.parents = (function () {
         <div class="bg-gradient-to-r from-[#0B2533] to-[#2B1736] rounded-3xl p-5 text-white border-t-4 border-t-[#D4A359]">
           <span class="inline-block bg-[#D4A359] text-[#0B2533] text-[11px] font-black px-3 py-0.5 rounded-full mb-1.5">أولياء الأمور</span>
           <h2 class="text-xl font-black">${activated} حساب مفعّل من ${rows.length}</h2>
-          <p class="text-xs text-slate-300 mt-1 leading-relaxed">يدخل ولي الأمر من رابط الطلاب برقم جواله المسجّل عند ابنه، وكلمة المرور الأولى آخر 3 أرقام من جواله، ثم يُلزَم بتغييرها. يُفعَّل الحساب تلقائياً عند أول دخول.</p>
+          <p class="text-xs text-slate-300 mt-1 leading-relaxed">يدخل ولي الأمر من رابط الطلاب برقم جواله المسجّل عند ابنه، وكلمة المرور الأولى 0000، ثم يُلزَم بتغييرها. يُفعَّل الحساب تلقائياً عند أول دخول.</p>
         </div>
         ${noPhone ? `<div class="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900"><i class="fa-solid fa-circle-info ml-1"></i> (${noPhone}) طالب بلا رقم جوال ولي أمر — أضفه من بيانات الطالب ليتمكن ولي أمره من الدخول.</div>` : ""}
         <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5">
@@ -328,11 +328,17 @@ window.parents = (function () {
     if (!state.currentUser || state.currentUser.role !== "admin") return;
     const p = allParents().find((x) => x.id === parentId);
     if (!p) return;
-    if (!confirm(`إعادة كلمة مرور ${p.name} (${p.phone}) إلى آخر 3 أرقام من جواله؟\nسيُطلب منه تغييرها عند الدخول.`)) return;
+    if (!confirm(`إعادة كلمة مرور ${p.name} (${p.phone}) إلى 0000؟\nسيُطلب منه تغييرها عند الدخول.`)) return;
     setUserPassword(p, defaultPassword(p.phone));
     p.mustChangePassword = true;
     p.updatedAt = Date.now();
-    persist("parents");
+    pushNotification({
+      userId: p.id,
+      category: "كلمة المرور",
+      title: "أُعيد تعيين كلمة مرورك",
+      message: "كلمة المرور الآن 0000، وسيُطلب منك تغييرها عند الدخول.",
+    });
+    persist("parents", "notifications");
     logAudit("إعادة تعيين كلمة مرور ولي أمر", `${p.name} ${p.phone}`);
     alert("تمت إعادة التعيين ✓");
     navigateTo("parents");

@@ -235,20 +235,14 @@ window.content = (function () {
   }
 
   // ---------- إشعارات ----------
-  function notifyStudents(pid, title, message, idPrefix) {
-    if (!Array.isArray(db.notifications)) db.notifications = [];
-    const have = new Set(db.notifications.map((n) => n && n.id));
+  function notifyStudents(pid, title, message, idPrefix, category) {
     programStudents(pid).forEach((s) => {
-      const id = idPrefix ? `${idPrefix}_${s.id}` : makeUniqueId("notif");
-      if (have.has(id)) return;
-      db.notifications.unshift({
-        id,
+      pushNotification({
+        id: idPrefix ? `${idPrefix}_${s.id}` : undefined,
         userId: s.id,
-        category: "الدروس والتكاليف",
+        category: category || "الدروس والتكاليف",
         title: cleanText(title, 150),
         message: cleanText(message, 300),
-        date: "الآن",
-        isRead: false,
       });
     });
   }
@@ -273,6 +267,7 @@ window.content = (function () {
         `تذكير: قراءة قبلية ${when}`,
         `${it.title}${it.pagesCount ? ` — ${it.pagesCount} صفحة` : ""}${it.pagesRange ? ` (${it.pagesRange})` : ""}`,
         `notif_rem_${it.id}`,
+        "تذكير قراءة",
       );
       it.reminderSentAt = Date.now();
       it.updatedAt = Date.now();

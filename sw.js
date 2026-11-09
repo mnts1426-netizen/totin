@@ -4,7 +4,7 @@
  * يجب أن يبقى هذا الملف في جذر الموقع بجانب index.html
  */
 
-const CACHE_NAME = "totin-platform-v4";
+const CACHE_NAME = "totin-platform-v5";
 const CORE_ASSETS = [
   "./",
   "./index.html",

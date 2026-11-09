@@ -357,10 +357,20 @@ window.programsAdmin = (function () {
 
   function moveStudents(students, targetPid, targetLevelId) {
     const grp = getDefaultGroupId(targetPid);
+    const lvl = targetLevelId || getDefaultLevelId(targetPid);
     students.forEach((s) => {
+      const changed = s.currentProgramId !== targetPid || s.currentLevelId !== lvl;
       s.currentProgramId = targetPid;
-      s.currentLevelId = targetLevelId || getDefaultLevelId(targetPid);
+      s.currentLevelId = lvl;
       s.groupId = grp;
+      if (changed) {
+        pushNotification({
+          userId: s.id,
+          category: "نقل",
+          title: "تم نقلك",
+          message: `انتقلت إلى برنامج ${getProgramName(targetPid)} — ${levelName(lvl)}`,
+        });
+      }
     });
   }
 
@@ -539,7 +549,7 @@ window.programsAdmin = (function () {
     const students = (db.users || []).filter((u) => u && u.role === "student" && ids.includes(u.id));
     if (!confirm(`نقل (${students.length}) طالب إلى ${target.name} — ${levelName(lvl)}؟`)) return;
     moveStudents(students, target.id, lvl);
-    persist("users");
+    persist("users", "notifications");
     logAudit("نقل طلاب", `${students.length} طالب إلى ${target.name} — ${levelName(lvl)}`);
     alert(`تم نقل (${students.length}) طالب ✓`);
     navigateTo("programs-manage");

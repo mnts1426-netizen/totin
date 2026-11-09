@@ -34,10 +34,12 @@ window.views = {
           t("content", "الدروس والتكاليف"),
         ]),
         g("grades", "fa-star-half-stroke", "#8AA838", "الدرجات", [t("grades", "الدرجات")]),
+        g("reports", "fa-file-lines", "#0369A1", "التقارير", [t("reports", "التقارير")]),
         g("comms", "fa-comments", "#E59824", "التواصل", [t("comms", "التواصل")]),
         g("settings", "fa-gear", "#64748B", "الإعدادات", [
           t("settings", "الإعدادات"),
           t("programs-manage", "البرامج"),
+          t("notif-access", "وصول الإشعارات"),
           t("schedule-manage", "الجلسات"),
           t("term-manage", "الفصل الدراسي"),
           t("audit-log", "سجل العمليات"),
@@ -59,8 +61,12 @@ window.views = {
         ]),
         g("students", "fa-user-graduate", "#D4A359", "طلابي والبطاقات", [t("students", "طلابي والبطاقات")]),
         g("grades", "fa-star-half-stroke", "#8AA838", "الدرجات", [t("grades", "الدرجات")]),
+        g("reports", "fa-file-lines", "#0369A1", "التقارير", [t("reports", "التقارير")]),
         g("comms", "fa-comments", "#E59824", "التواصل", [t("comms", "التواصل")]),
-        g("settings", "fa-gear", "#64748B", "الإعدادات", [t("settings", "الإعدادات")]),
+        g("settings", "fa-gear", "#64748B", "الإعدادات", [
+          t("settings", "الإعدادات"),
+          t("notif-access", "وصول الإشعارات"),
+        ]),
       ];
     }
     if (role === "parent") {
@@ -72,7 +78,10 @@ window.views = {
     // الطالب
     return [
       g("home", "fa-house", "#D4A359", "الرئيسية والبرنامج", [t("home", "الرئيسية")]),
-      g("my-report", "fa-chart-simple", "#9E1B48", "تقريري", [t("my-report", "تقريري")]),
+      g("my-report", "fa-chart-simple", "#9E1B48", "تقريري وبطاقتي", [
+        t("my-report", "تقريري"),
+        t("my-card", "بطاقتي"),
+      ]),
       g("work", "fa-list-check", "#8AA838", "جدولي ومهامي", [
         t("schedule", "جدولي الدراسي"),
         t("tasks", "مهامي وواجباتي"),
@@ -225,39 +234,19 @@ window.views = {
 
                     <form onsubmit="event.preventDefault(); handleLoginSubmit('${programId}');" class="p-5 sm:p-6 space-y-3.5 text-xs">
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">اختر الحساب للدخول المباشر:</label>
-                            <select id="login-user-select" onchange="views.fillLoginCredentials(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
-                                <option value="">-- اختر الحساب المطلوب --</option>
-                                ${(() => {
-                                  const admins = db.users.filter((u) => u.role === "admin");
-                                  const sups = db.users.filter((u) => u.role === "supervisor");
-                                  const studs = db.users.filter(
-                                    (u) =>
-                                      u.role === "student" &&
-                                      (!state.lockedProgramId ||
-                                        u.currentProgramId === state.lockedProgramId),
-                                  );
-                                  const staffGroups = `
-                                    <optgroup label="الإدارة">
-                                        ${admins.map((a) => `<option value="${a.id}">${a.name}</option>`).join("")}
-                                    </optgroup>
-                                    <optgroup label="المشرفون">
-                                        ${sups.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")}
-                                    </optgroup>`;
-                                  const studentGroup = `
-                                    <optgroup label="الطلاب">
-                                        ${studs.map((st) => `<option value="${st.id}">طالب: ${st.name}</option>`).join("")}
-                                    </optgroup>`;
-                                  if (state.portalMode === "student") return studentGroup;
-                                  if (state.portalMode === "staff") return staffGroups;
-                                  return staffGroups + studentGroup;
-                                })()}
-                            </select>
-                        </div>
-
-                        <div>
-                            <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
-                            <input id="login-phone" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]" placeholder="05xxxxxxxx">
+                            <label class="block font-bold text-slate-700 mb-1">${
+                              state.portalMode === "staff"
+                                ? "رقم الجوال أو رقم الهوية:"
+                                : state.portalMode === "student"
+                                  ? "اسم المستخدم:"
+                                  : "اسم المستخدم (للطلاب) أو رقم الجوال:"
+                            }</label>
+                            <input id="login-phone" required inputmode="numeric" autocomplete="username" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]" placeholder="${state.portalMode === "staff" ? "05xxxxxxxx" : "مثال: 1005"}">
+                            ${
+                              state.portalMode === "staff"
+                                ? ""
+                                : '<p class="text-[10px] text-slate-400 mt-1">الطالب: اسم المستخدم مكتوب في بطاقته. ولي الأمر: يدخل برقم جواله.</p>'
+                            }
                         </div>
 
                         <div>
@@ -296,22 +285,30 @@ window.views = {
   // 4. الواجهة الرئيسية مع شريط تثبيت التطبيق وتفعيل الإشعارات
   renderHome(user) {
     if (!user) return this.renderPortalView();
-    const installBannerHtml = `
+    let bannerHidden = false;
+    try {
+      bannerHidden = localStorage.getItem("totin_hide_install_banner") === "1";
+    } catch (e) {}
+    const installed = window.isAppInstalled ? window.isAppInstalled() : false;
+    const installBannerHtml =
+      installed || bannerHidden
+        ? ""
+        : `
             <div id="pwa-install-banner" class="bg-gradient-to-r from-[#0B2533] via-[#163a75] to-[#0B2533] rounded-2xl p-4 text-white shadow-md border-r-4 border-r-[#D4A359] flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                 <div class="flex items-center space-x-3 space-x-reverse">
                     <div class="w-10 h-10 rounded-xl bg-white/10 text-[#D4A359] flex items-center justify-center text-lg border border-[#D4A359]/30 shrink-0">
                         <i class="fa-solid fa-mobile-screen-button"></i>
                     </div>
                     <div>
-                        <h4 class="font-black text-sm text-white">تثبيت المنصة كتطبيق على جهازك وتفعيل التنبيهات</h4>
-                        <p class="text-[11px] text-slate-300">قم بتثبيت المنصة كتطبيق سريع ومستقل على جوالك أو جهازك لتلقي التنبيهات والإشعارات فورياً.</p>
+                        <h4 class="font-black text-sm text-white">ثبّت المنصة كتطبيق على جهازك</h4>
+                        <p class="text-[11px] text-slate-300">تفتح أسرع من أيقونة على جوالك. وتفعيل الإشعارات من «الإعدادات».</p>
                     </div>
                 </div>
                 <div class="flex items-center space-x-2 space-x-reverse shrink-0">
-                    <button onclick="views.installAppAndNotify()" class="js-install-notify-btn px-3.5 py-1.5 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-xl text-xs transition shadow-xs flex items-center">
-                        <i class="fa-solid fa-cloud-arrow-down ml-1.5 text-xs"></i> تثبيت التطبيق وتفعيل الإشعارات
+                    <button onclick="window.installAppOnly && window.installAppOnly()" class="px-3.5 py-1.5 bg-[#D4A359] hover:bg-amber-500 text-[#0B2533] font-black rounded-xl text-xs transition shadow-xs flex items-center">
+                        <i class="fa-solid fa-cloud-arrow-down ml-1.5 text-xs"></i> تثبيت التطبيق
                     </button>
-                    <button onclick="document.getElementById('pwa-install-banner').remove()" class="p-1.5 text-slate-400 hover:text-white rounded-lg transition" title="إغلاق">
+                    <button onclick="views.hideInstallBanner()" class="p-1.5 text-slate-400 hover:text-white rounded-lg transition" title="إخفاء نهائياً">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>
@@ -319,7 +316,7 @@ window.views = {
         `;
 
     if (user.role === "admin")
-      return `<div class="space-y-4 sm:space-y-6">${installBannerHtml}${this.renderAdminDashboard()}</div>`;
+      return `<div class="space-y-4 sm:space-y-6">${installBannerHtml}${this.renderAdminDashboard()}${this.renderMyTasksCard(user)}</div>`;
     if (user.role === "supervisor")
       return `<div class="space-y-4 sm:space-y-6">${installBannerHtml}${this.renderSupervisorDashboard(user)}</div>`;
 
@@ -387,6 +384,186 @@ window.views = {
                 ${this.renderScheduleWidget(currentProg.id)}
             </div>
         `;
+  },
+
+  // "مهامك المكلف بها" (للمدير كما عند المشرف)
+  renderMyTasksCard(user) {
+    const myTasks = getVisibleTasks(user).filter((t) => t.assignedTo === user.id);
+    return `
+      <div class="bg-white p-4 sm:p-6 rounded-3xl border border-slate-200 shadow-sm border-t-2 border-t-[#D4A359]">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-sm sm:text-base font-bold text-[#0B2533]"><i class="fa-solid fa-list-check text-[#D4A359] ml-1.5"></i> مهامك المكلف بها</h3>
+          <button onclick="views.openAddTaskModal('${firstActiveProgramId()}')" class="text-xs text-[#0B2533] font-bold hover:text-[#D4A359]">+ إضافة مهمة</button>
+        </div>
+        <div class="space-y-2">
+          ${
+            myTasks.length === 0
+              ? '<div class="text-slate-400 text-xs text-center py-3">لا توجد مهام مكلف بها حالياً</div>'
+              : myTasks
+                  .map(
+                    (t) => `
+            <div onclick="views.openTaskModal('${t.id}')" class="flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-slate-200 cursor-pointer transition">
+              <div>
+                <div class="text-xs sm:text-sm font-bold text-slate-800">${escHtml(t.title)}</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">${escHtml(taskWhenText(t))} | ${escHtml(getProgramName(t.programId))}</div>
+              </div>
+              <span class="badge ${t.status === "مكتملة" ? "badge-completed" : t.status === "معفى بعذر" ? "badge-exempt" : "badge-pending"}">${escHtml(t.status)}</span>
+            </div>`,
+                  )
+                  .join("")
+          }
+        </div>
+      </div>`;
+  },
+
+  // التقارير: الخانة جاهزة، والأعمدة تُضاف عند تحديدها
+  renderReportsPlaceholder() {
+    return `
+      <div class="space-y-4">
+        <div class="bg-gradient-to-r from-[#0B2533] to-[#2B1736] rounded-3xl p-5 text-white border-t-4 border-t-[#D4A359]">
+          <span class="inline-block bg-[#D4A359] text-[#0B2533] text-[11px] font-black px-3 py-0.5 rounded-full mb-1.5">التقارير</span>
+          <h2 class="text-xl font-black">تقارير الطلاب</h2>
+          <p class="text-xs text-slate-300 mt-0.5">تقرير لكل الطلاب أو لبرنامج أو لطالب واحد، مع التنزيل.</p>
+        </div>
+        <div class="bg-white rounded-3xl border border-dashed border-slate-300 p-10 text-center">
+          <i class="fa-solid fa-hourglass-half text-3xl text-[#D4A359]"></i>
+          <div class="font-black text-[#0B2533] mt-3">قريباً</div>
+          <p class="text-xs text-slate-500 mt-1">هذه الخانة جاهزة، وتُفعّل التقارير بعد تحديد أعمدتها.</p>
+        </div>
+      </div>`;
+  },
+
+  // بطاقتي (للطالب): البطاقة نفسها بالباركود وQR، مع الطباعة
+  renderMyCardView() {
+    const me = state.currentUser;
+    return `
+      <div class="space-y-4 max-w-md mx-auto">
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 text-center space-y-4">
+          <h2 class="font-black text-[#0B2533]"><i class="fa-solid fa-id-card text-[#D4A359] ml-1.5"></i> بطاقتي</h2>
+          <div id="print-area" class="cards-grid cards-cols-1 code-both flex justify-center">
+            ${this.buildStudentBadgeHtml(me, false)}
+          </div>
+          <div class="text-[11px] text-slate-500 leading-relaxed bg-slate-50 rounded-2xl border border-slate-200 p-3">
+            <i class="fa-solid fa-camera text-[#169BA2] ml-1"></i>
+            للتحضير بالجوال: اعرض رمز <b>QR</b> أمام كاميرا المشرف في «التحضير السريع».
+            اسم المستخدم للدخول: <b class="text-[#0B2533]">${escHtml(me.username || "")}</b>
+          </div>
+          <button onclick="views.printCards()" class="px-5 py-2.5 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-black rounded-xl text-xs transition">
+            <i class="fa-solid fa-print ml-1.5"></i> طباعة / حفظ PDF
+          </button>
+        </div>
+      </div>`;
+  },
+
+  // صفحة "وصول الإشعارات" (المدير والمشرف): تشغيل/إيقاف كل نوع + من فعّل الإشعارات
+  renderNotifAccessView() {
+    const toggles = getAppSettings().notifToggles || {};
+    const onCount = NOTIF_TYPES.filter((t) => toggles[t.key] !== false).length;
+    const rows = NOTIF_TYPES.map((t) => {
+      const on = toggles[t.key] !== false;
+      return `
+        <div class="flex items-center justify-between gap-3 py-2.5 border-b border-slate-100 last:border-0">
+          <div class="min-w-0">
+            <div class="font-black text-xs text-slate-800">${escHtml(t.label)}</div>
+            <div class="text-[10px] text-slate-400">يصل إلى: ${escHtml(t.to)}</div>
+          </div>
+          <button onclick="setNotifTypeEnabled('${t.key}', ${on ? "false" : "true"})" role="switch" aria-checked="${on}" title="${on ? "إيقاف" : "تشغيل"}"
+            class="relative shrink-0 w-12 h-6 rounded-full transition ${on ? "bg-emerald-600" : "bg-slate-300"}">
+            <span class="absolute top-0.5 ${on ? "right-0.5" : "right-[1.6rem]"} w-5 h-5 rounded-full bg-white shadow transition-all"></span>
+          </button>
+        </div>`;
+    }).join("");
+    setTimeout(() => this.loadNotifDevices(), 0);
+    return `
+      <div class="space-y-4">
+        <div class="bg-gradient-to-r from-[#0B2533] to-[#2B1736] rounded-3xl p-5 text-white border-t-4 border-t-[#D4A359]">
+          <span class="inline-block bg-[#D4A359] text-[#0B2533] text-[11px] font-black px-3 py-0.5 rounded-full mb-1.5">وصول الإشعارات</span>
+          <h2 class="text-xl font-black">${onCount} نوعاً مفعّلاً من ${NOTIF_TYPES.length}</h2>
+          <p class="text-xs text-slate-300 mt-0.5">أوقف أي نوع فلا يُرسل لأحد. التغيير يسري على الجميع فوراً.</p>
+        </div>
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5">${rows}</div>
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-5">
+          <h3 class="font-black text-[#0B2533] text-sm mb-2"><i class="fa-solid fa-mobile-screen text-[#D4A359] ml-1.5"></i> من فعّل الإشعارات على جهازه</h3>
+          <div id="notif-devices-box" class="text-xs text-slate-400">جارِ التحميل...</div>
+        </div>
+      </div>`;
+  },
+
+  loadNotifDevices() {
+    const box = document.getElementById("notif-devices-box");
+    if (!box) return;
+    if (!window.dbFirestore || !window.dbFirestore.collection("totin_tokens").get) {
+      box.textContent = "غير متاح بدون اتصال بالسحابة.";
+      return;
+    }
+    window.dbFirestore
+      .collection("totin_tokens")
+      .get()
+      .then((qs) => {
+        const per = new Map();
+        qs.forEach((d) => {
+          const uid = d.data().userId;
+          per.set(uid, (per.get(uid) || 0) + 1);
+        });
+        const nameOf = (id) => {
+          const u = (findAccountById && findAccountById(id)) || null;
+          return u ? u.name : "حساب محذوف";
+        };
+        const list = Array.from(per.entries()).sort((x, y) => compareNames(nameOf(x[0]), nameOf(y[0])));
+        const b = document.getElementById("notif-devices-box");
+        if (!b) return;
+        b.innerHTML = list.length
+          ? `<div class="text-slate-500 mb-2">${list.length} شخص فعّلوا الإشعارات:</div><div class="flex flex-wrap gap-1.5">${list
+              .map(([id, n]) => `<span class="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold">${escHtml(nameOf(id))}${n > 1 ? ` (${n} أجهزة)` : ""}</span>`)
+              .join("")}</div>`
+          : "لم يفعّل أحد الإشعارات على جهازه بعد.";
+      })
+      .catch(() => {
+        const b = document.getElementById("notif-devices-box");
+        if (b) b.textContent = "تعذّر التحميل.";
+      });
+  },
+
+  // إخفاء شريط التثبيت نهائياً على هذا الجهاز
+  hideInstallBanner() {
+    try {
+      localStorage.setItem("totin_hide_install_banner", "1");
+    } catch (e) {}
+    const b = document.getElementById("pwa-install-banner");
+    if (b) b.remove();
+  },
+
+  // قسم "التطبيق والإشعارات" في الإعدادات (لكل المستخدمين)
+  renderAppSection() {
+    const installed = window.isAppInstalled ? window.isAppInstalled() : false;
+    const ns = window.notificationState ? window.notificationState() : "unsupported";
+    const ios = window.isIOSDevice ? window.isIOSDevice() : false;
+    const badge = (ok, txt) =>
+      `<span class="text-[10px] font-black px-2 py-0.5 rounded-lg border ${ok ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}">${txt}</span>`;
+    const nsText = {
+      granted: badge(true, "مفعّلة ✓"),
+      denied: badge(false, "محظورة من المتصفح"),
+      default: badge(false, "غير مفعّلة"),
+      unsupported: badge(false, ios && !installed ? "ثبّت التطبيق أولاً" : "غير مدعومة"),
+    }[ns];
+    return `
+      <div id="app-settings-section" class="max-w-xl space-y-3 text-xs">
+        <h3 class="text-sm font-black text-[#0B2533]"><i class="fa-solid fa-mobile-screen-button text-[#D4A359] ml-1.5"></i> التطبيق والإشعارات</h3>
+        <div class="rounded-2xl border border-slate-200 p-3 flex items-center justify-between gap-3">
+          <div>
+            <div class="font-black text-slate-800">تثبيت المنصة كتطبيق ${badge(installed, installed ? "مثبّت ✓" : "غير مثبّت")}</div>
+            <div class="text-[10px] text-slate-500 mt-0.5">${ios ? "على الآيفون: Safari ← مشاركة ← إضافة إلى الشاشة الرئيسية." : "أيقونة على جوالك تفتح المنصة مباشرة."}</div>
+          </div>
+          ${installed ? "" : `<button onclick="window.installAppOnly && window.installAppOnly()" class="shrink-0 px-3 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl transition">تثبيت</button>`}
+        </div>
+        <div class="rounded-2xl border border-slate-200 p-3 flex items-center justify-between gap-3">
+          <div>
+            <div class="font-black text-slate-800">الإشعارات على هذا الجهاز ${nsText}</div>
+            <div class="text-[10px] text-slate-500 mt-0.5">تصلك حتى والتطبيق مغلق (أندرويد، الكمبيوتر، والآيفون 16.4+ بعد التثبيت).</div>
+          </div>
+          ${ns === "granted" ? `<button onclick="window.sendTestNotification && window.sendTestNotification()" class="shrink-0 px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl">إشعار تجريبي</button>` : `<button onclick="window.enableNotificationsOnly && window.enableNotificationsOnly()" class="shrink-0 px-3 py-2 bg-[#0B2533] hover:bg-[#D4A359] hover:text-[#0B2533] text-white font-bold rounded-xl transition">تفعيل</button>`}
+        </div>
+      </div>`;
   },
 
   // دالة موحّدة: تثبيت التطبيق + تفعيل الإشعارات بضغطة واحدة (بدون أي خدمة خارجية)
@@ -601,8 +778,8 @@ window.views = {
                                         const dayEvents = progSchedules.filter(
                                           (s) => s.dayOfWeek === dayObj.idx,
                                         );
-                                        const dayTasks = progTasks.filter(
-                                          (t) => t.dayOfWeek === dayObj.idx,
+                                        const dayTasks = progTasks.filter((t) =>
+                                          taskOccursOn(t, dateInfo.fullDate, dayObj.idx),
                                         );
 
                                         return `
@@ -799,14 +976,18 @@ window.views = {
     const timeRemaining = calculateTimeRemaining(task.date, task.startTime);
     const isAdmin = state.currentRole === "admin";
 
+    // التوكيل لأي مشرف (أو إداري) من أي برنامج
     const eligibleSupervisors = db.users.filter(
       (u) =>
-        u.role === "supervisor" &&
-        u.id !== task.assignedTo &&
-        (u.assignedPrograms || []).includes(task.programId),
+        (u.role === "supervisor" || u.role === "admin") &&
+        !u.isRestricted &&
+        u.id !== task.assignedTo,
     );
 
-    const canManage = isAdmin || state.currentUser.id === task.assignedTo;
+    const canManage =
+      isAdmin ||
+      state.currentUser.id === task.assignedTo ||
+      state.currentUser.id === task.createdBy;
     const isStudentTask = assignee.role === "student";
     const ev = getTaskEvaluation(task.id);
     const canEvaluate =
@@ -921,9 +1102,32 @@ window.views = {
                                     </div>
                                 `
                                     : `
-                                    <p class="text-slate-400 text-[10px]">لا يوجد مشرفون آخرون مسجلون بنفس البرنامج للتوكيل.</p>
+                                    <p class="text-slate-400 text-[10px]">لا يوجد مشرفون آخرون للتوكيل.</p>
                                 `
                                 }
+                            </div>
+                        `
+                            : ""
+                        }
+
+                        ${
+                          canManage && !task.isExempt && task.status !== "مكتملة"
+                            ? `
+                            <div class="pt-2 border-t border-slate-100">
+                                <div class="text-slate-700 font-bold mb-1.5 flex items-center">
+                                    <i class="fa-solid fa-calendar-plus text-[#9E1B48] ml-1"></i> تأجيل المهمة:
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    ${
+                                      task.isRecurring && !task.onceDate
+                                        ? `<label class="text-[10px] text-slate-500">الموعد المؤجَّل<input id="pp-from" type="date" value="${nextDateForWeekday(task.dayOfWeek, todayStr())}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-1.5 font-bold text-slate-700"></label>`
+                                        : ""
+                                    }
+                                    <label class="text-[10px] text-slate-500">إلى تاريخ<input id="pp-to" type="date" min="${todayStr()}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-1.5 font-bold text-slate-700"></label>
+                                    <label class="text-[10px] text-slate-500">من<input id="pp-start" value="${escHtml(task.startTime || "")}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-1.5 font-bold text-slate-700"></label>
+                                    <label class="text-[10px] text-slate-500">إلى<input id="pp-end" value="${escHtml(task.endTime || "")}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-1.5 font-bold text-slate-700"></label>
+                                </div>
+                                <button onclick="postponeTask('${task.id}')" class="mt-2 w-full py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 font-bold rounded-xl text-xs">تأجيل</button>
                             </div>
                         `
                             : ""
@@ -968,16 +1172,16 @@ window.views = {
   openAddTaskModal(defaultProgramId) {
     const user = state.currentUser;
     const isAdmin = user.role === "admin";
-    const availablePrograms = isAdmin
-      ? getActivePrograms()
-      : getActivePrograms().filter((p) =>
-          (user.assignedPrograms || []).includes(p.id),
-        );
+    // المدير والمشرف يكلّفان أي أحد من أي برنامج
+    const availablePrograms = getActivePrograms();
     const students = db.users.filter(
       (u) => u.role === "student" && !u.isRestricted,
     );
-    const supervisors = db.users.filter(
-      (u) => u.role === "supervisor" && !u.isRestricted,
+    const staff = db.users.filter(
+      (u) =>
+        (u.role === "supervisor" || u.role === "admin") &&
+        !u.isRestricted &&
+        u.id !== user.id,
     );
     const templates = db.taskTemplates || [];
 
@@ -1040,20 +1244,13 @@ window.views = {
                             <div>
                                 <label class="block font-bold text-slate-700 mb-1">إسناد وتكليف إلى:</label>
                                 <select id="new-task-assignee" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-700">
-                                    ${
-                                      isAdmin
-                                        ? `
-                                        <optgroup label="المشرفون">
-                                            ${supervisors.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")}
-                                        </optgroup>
-                                        <optgroup label="الطلاب">
-                                            ${students.map((st) => `<option value="${st.id}">طالب: ${st.name}</option>`).join("")}
-                                        </optgroup>
-                                    `
-                                        : `
-                                        <option value="${user.id}">لنفسي (${user.name})</option>
-                                    `
-                                    }
+                                    <option value="${user.id}">لنفسي (${escHtml(user.name)})</option>
+                                    <optgroup label="المشرفون والإدارة">
+                                        ${staff.map((s) => `<option value="${s.id}">${escHtml(s.name)}${s.role === "admin" ? " (إدارة)" : ""}</option>`).join("")}
+                                    </optgroup>
+                                    <optgroup label="الطلاب">
+                                        ${students.map((st) => `<option value="${st.id}">طالب: ${escHtml(st.name)} — ${escHtml(getProgramName(st.currentProgramId))}</option>`).join("")}
+                                    </optgroup>
                                 </select>
                             </div>
                         </div>
@@ -1084,7 +1281,12 @@ window.views = {
                         <div class="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 space-y-2">
                             <label class="flex items-center space-x-2 space-x-reverse font-bold text-slate-800 cursor-pointer">
                                 <input type="checkbox" id="new-task-attendance" class="accent-[#D4A359]">
-                                <span>تكليف المشرف بالتحضير في هذا اليوم (إلزامي)</span>
+                                <span>فيها تحضير (يُرصد الحضور في هذا اليوم)</span>
+                            </label>
+
+                            <label class="flex items-center space-x-2 space-x-reverse font-bold text-slate-800 cursor-pointer pt-1 border-t border-slate-200">
+                                <input type="checkbox" id="new-task-students" class="accent-[#D4A359]">
+                                <span>تظهر في جدول طلاب البرنامج (ويصلهم إشعار)</span>
                             </label>
 
                             <label class="flex items-center space-x-2 space-x-reverse font-bold text-slate-800 cursor-pointer pt-1 border-t border-slate-200">
@@ -1184,6 +1386,7 @@ window.views = {
       requiresAttendance,
       isRecurring,
       stopDate,
+      showToStudents: (document.getElementById("new-task-students") || {}).checked,
       assignedTo,
       assigneeRole: targetUser ? targetUser.role : "supervisor",
     });
@@ -1388,7 +1591,7 @@ window.views = {
                                     </div>
                                     <div>
                                         <div class="font-black text-slate-800 text-xs sm:text-sm">${st.name}</div>
-                                        <div class="text-[10px] text-slate-400 font-mono">${st.studentNumber} | جوال الأب: ${st.fatherPhone || "غير مسجل"}</div>
+                                        <div class="text-[10px] text-slate-400 font-mono">${st.username || st.studentNumber || ""} | جوال الأب: ${st.fatherPhone || "غير مسجل"}</div>
                                     </div>
                                 </div>
 
@@ -1430,7 +1633,10 @@ window.views = {
     const student = db.users.find(
       (u) =>
         u.role === "student" &&
-        (u.studentNumber === code || u.phone === code || u.id === code),
+        (String(u.username || "") === code ||
+          u.studentNumber === code ||
+          u.phone === code ||
+          u.id === code),
     );
 
     const feedback = document.getElementById("barcode-scan-feedback");
@@ -1673,7 +1879,7 @@ window.views = {
                                         ${st.isRestricted ? '<span class="badge badge-restricted text-[9px]">مقيد</span>' : ""}
                                     </div>
                                     <div class="text-[11px] text-slate-500 mt-0.5">
-                                        <span class="font-mono text-[#D4A359] font-bold">${st.studentNumber}</span> | 
+                                        <span class="font-mono text-[#D4A359] font-bold">${st.username || st.studentNumber || ""}</span> | 
                                         <span>جوال: ${st.phone || "غير مسجل"}</span> | 
                                         <span class="text-[#0B2533] font-bold">برنامج ${getProgramName(st.currentProgramId)}</span>
                                     </div>
@@ -1858,7 +2064,7 @@ window.views = {
   buildStudentBadgeHtml(student, compact) {
     const program =
       db.programs.find((p) => p.id === student.currentProgramId) || {};
-    const code = String(student.studentNumber || student.id || "");
+    const code = String(student.username || student.studentNumber || student.id || "");
     const esc = (v) => (typeof escHtml === "function" ? escHtml(v) : v);
     return `
             <div class="student-id-badge ${compact ? "badge-compact" : ""} bg-white flex flex-col justify-between overflow-hidden">
@@ -1971,7 +2177,7 @@ window.views = {
                             </div>
                             <div>
                                 <h3 class="font-bold text-sm leading-snug">${student.name}</h3>
-                                <span class="text-[9px] text-[#D4A359] font-bold">${student.studentNumber}</span>
+                                <span class="text-[9px] text-[#D4A359] font-bold">${student.username || student.studentNumber || ""}</span>
                             </div>
                         </div>
                         <button onclick="closeModal('student-details-modal')" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
@@ -2034,6 +2240,11 @@ window.views = {
                             <input id="edit-stu-name" value="${student.name}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                         </div>
 
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">اسم المستخدم (للدخول — لا يتكرر):</label>
+                            <input id="edit-stu-username" value="${escHtml(student.username || "")}" inputmode="numeric" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-black text-[#0B2533] focus:outline-none focus:border-[#D4A359]">
+                        </div>
+
                         <div class="grid grid-cols-2 gap-2.5">
                             <div>
                                 <label class="block font-bold text-slate-700 mb-1">رقم الجوال:</label>
@@ -2082,8 +2293,10 @@ window.views = {
     const fatherPhone = document.getElementById("edit-stu-father-phone").value;
     const currentProgramId = document.getElementById("edit-stu-prog").value;
     const password = document.getElementById("edit-stu-pass").value;
+    const unEl = document.getElementById("edit-stu-username");
 
     updateStudentData(studentId, {
+      username: unEl ? unEl.value : undefined,
       name,
       phone,
       nationalId,
@@ -2803,6 +3016,9 @@ window.views = {
                     <h2 class="text-lg font-extrabold text-[#0B2533]"><i class="fa-solid fa-gear text-[#D4A359] ml-1.5"></i> إعدادات الحساب</h2>
                 </div>
 
+                ${this.renderAppSection()}
+                <div class="max-w-xl border-t border-slate-100"></div>
+
                 <div class="max-w-xl space-y-3.5 text-xs">
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">الاسم:</label>
@@ -2830,7 +3046,7 @@ window.views = {
                         <input id="set-user-pass" type="password" autocomplete="new-password" placeholder="اترك الحقل فارغاً لعدم التغيير" class="w-full bg-white border border-amber-300 rounded-xl p-2 font-bold text-slate-800 focus:outline-none focus:border-[#D4A359]">
                         ${
                           needsApproval
-                            ? `<p class="text-[10px] text-amber-800 mt-1">تغيير كلمة المرور أو البيانات يحتاج <b>اعتماد المدير</b>.</p>`
+                            ? `<p class="text-[10px] text-amber-800 mt-1">كلمة المرور تتغير مباشرة. أما تعديل البيانات الأخرى فيحتاج <b>اعتماد المدير</b>.</p>`
                             : ""
                         }
                     </div>

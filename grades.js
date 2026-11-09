@@ -344,7 +344,13 @@ window.grades = (function () {
     const note = cleanText((document.getElementById("ga-note") || {}).value || "", 120);
     const points = Math.round(item.value * times * 100) / 100;
     applyRaw(st, item, times, points, note, null);
-    persist("gradeTotals", "gradeLog");
+    notifyStudentAndParents(
+      st,
+      "درجة",
+      `${points >= 0 ? "درجة جديدة" : "خصم درجة"}: ${item.name} (${fmt(points)})`,
+      note || `مجموعك الآن: ${fmt(studentTotal(st.id))}`,
+    );
+    persist("gradeTotals", "gradeLog", "notifications");
     logAudit("رصد درجة", `${st.name}: ${item.name} ×${times} (${fmt(points)})`);
     closeModal("grade-apply-modal");
     refreshOpenStudentModal(st.id);
