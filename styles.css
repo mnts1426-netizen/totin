@@ -603,3 +603,82 @@ body {
     print-color-adjust: exact !important;
   }
 }
+
+
+/* ==========================================================================
+   بطاقات الطلاب بتصميم البرامج (تأهيل / تأصيل / رسوخ)
+   المواضع بالنسبة المئوية من التصميم الأصلي 1334×2000
+   ========================================================================== */
+.student-id-badge.designed-card {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  height: auto !important;
+  padding: 0 !important;
+  border: none;
+  border-radius: 8px;
+  background-color: #efe7d6;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  container-type: inline-size;
+  overflow: hidden;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.designed-card .dc-barcode {
+  position: absolute;
+  left: 10.04%;
+  width: 79.84%;
+  top: 53.5%;
+  height: 6.3%;
+}
+.designed-card .dc-barcode svg {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+.designed-card .dc-code {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 60.15%;
+  text-align: center;
+  font-family: "Tajawal", sans-serif;
+  font-weight: 800;
+  font-size: 3.1cqw;
+  line-height: 1;
+  letter-spacing: 0.25em;
+  direction: ltr;
+}
+.designed-card .dc-name {
+  position: absolute;
+  left: 10.3%;
+  width: 79.4%;
+  top: 62.85%;
+  height: 7.95%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-family: "Baloo Bhaijaan 2", "Tajawal", sans-serif;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.designed-card .dc-name.dc-name-2l {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  padding: 0 3%;
+}
+
+@media print {
+  body.printing-cards #print-area .student-id-badge.designed-card {
+    height: auto !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+}

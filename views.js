@@ -1637,12 +1637,15 @@ window.views = {
   // ملاحظة: بلا alert() حتى لا يتوقف تدفق المسح المتتالي لعدة طلاب
   processBarcodeScan(scannedCode, scheduleId) {
     if (!scannedCode || scannedCode.trim() === "") return false;
-    const code = scannedCode.trim();
+    const code = normalizeDigits(scannedCode.trim());
+    // باركود بطاقات التصميم = اسم المستخدم مسبوقاً بأصفار (0000001003)
+    const unpadded = /^0+\d+$/.test(code) ? code.replace(/^0+/, "") : code;
 
     const student = db.users.find(
       (u) =>
         u.role === "student" &&
         (String(u.username || "") === code ||
+          (unpadded !== code && String(u.username || "") === unpadded) ||
           u.studentNumber === code ||
           u.phone === code ||
           u.id === code),
@@ -2070,7 +2073,35 @@ window.views = {
   },
 
   // بناء قالب البطاقة المصغرة (باركود + QR)
+  // تصاميم البطاقات المعتمدة لكل برنامج (الخلفية بدون اسم وباركود، ولون الباركود)
+  CARD_DESIGNS: {
+    prog_taheel: { bg: "cards/card-taheel.webp", color: "#436c6a" },
+    prog_taseel: { bg: "cards/card-taseel.webp", color: "#025267" },
+    prog_rasookh: { bg: "cards/card-rasookh.webp", color: "#005f73" },
+  },
+
+  // بطاقة بتصميم البرنامج: الباركود بعرض الشريط، واسم المستخدم تحته، والاسم داخل الإطار
+  buildDesignedBadgeHtml(student, design) {
+    const esc = (v) => (typeof escHtml === "function" ? escHtml(v) : v);
+    const code = String(student.username || student.studentNumber || student.id || "");
+    const barcodeValue = /^\d+$/.test(code) && code.length < 10 ? code.padStart(10, "0") : code;
+    const name = String(student.name || "");
+    // الأسماء الطويلة يصغر خطها حتى تبقى داخل الإطار
+    // اسم طويل جداً يُكتب على سطرين داخل الإطار بدل تصغيره كثيراً
+    const twoLines = name.length > 24;
+    const size = twoLines ? 5 : Math.min(8, (8 * 15) / Math.max(15, name.length));
+    return `
+            <div class="student-id-badge designed-card" style="background-image:url('${design.bg}')">
+                <div class="dc-barcode"><svg class="badge-barcode" data-code="${esc(barcodeValue)}" data-color="${design.color}"></svg></div>
+                <div class="dc-code" style="color:${design.color}">${esc(code)}</div>
+                <div class="dc-name${twoLines ? " dc-name-2l" : ""}" style="font-size:${size.toFixed(2)}cqw">${esc(name)}</div>
+            </div>
+        `;
+  },
+
   buildStudentBadgeHtml(student, compact) {
+    const design = this.CARD_DESIGNS[student.currentProgramId];
+    if (design) return this.buildDesignedBadgeHtml(student, design);
     const program =
       db.programs.find((p) => p.id === student.currentProgramId) || {};
     const code = String(student.username || student.studentNumber || student.id || "");
@@ -2113,13 +2144,23 @@ window.views = {
       if (!code) return;
       try {
         if (typeof JsBarcode === "function") {
+          const color = svg.getAttribute("data-color");
           JsBarcode(svg, code, {
-            format: "CODE128",
+            // بطاقات التصميم: CODE128B يعطي أعمدة كثيفة رفيعة مثل التصميم
+            format: color ? "CODE128B" : "CODE128",
             displayValue: false,
             margin: 0,
-            height: 34,
-            width: 1.4,
+            height: color ? 120 : 34,
+            width: color ? 3 : 1.4,
+            lineColor: color || "#000000",
+            background: color ? "transparent" : "#ffffff",
           });
+          // بطاقات التصميم: الباركود يمتد بعرض الشريط كاملاً كما في التصميم
+          if (color) {
+            svg.setAttribute("preserveAspectRatio", "none");
+            svg.removeAttribute("width");
+            svg.removeAttribute("height");
+          }
         } else {
           svg.outerHTML =
             '<div class="badge-num" style="font-size:9px">' + safe(code) + "</div>";
