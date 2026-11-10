@@ -48,6 +48,8 @@ window.store = (function () {
     "parents",
     "programs",
     "levels",
+    "books",
+    "reminders",
   ];
 
   // مجموعات متجددة: يُبقى أحدث (max) فقط، والحذف منها تقليم وليس حذفاً يُحفظ

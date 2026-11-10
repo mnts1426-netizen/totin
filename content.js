@@ -211,6 +211,7 @@ window.content = (function () {
     if (item.type === "sheet") {
       if (e.paperReceivedAt) return { done: true, label: "استُلمت ورقياً", pct: 1 };
       if (e.submittedAt) return { done: true, label: "سُلّم إلكترونياً", pct: 1 };
+      if (e.fileUpload && e.fileUpload.path) return { done: true, label: "رُفع ملف", pct: 1 };
       return { done: false, label: "لم يُسلَّم", pct: 0 };
     }
     if (item.type === "media") {
@@ -347,6 +348,7 @@ window.content = (function () {
               </div>
               <div class="font-bold text-slate-700">طريقة التسليم (واحدة أو الاثنتين):</div>
               <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer"><input id="ce-mode-paper" type="checkbox" class="accent-[#D4A359]" ${!it || (it.modes || {}).paper ? "checked" : ""}> ورقياً: يطبعها الطالب ويعبّئها ويسلّمها للمشرف</label>
+              <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer"><input id="ce-mode-upload" type="checkbox" class="accent-[#D4A359]" ${it && (it.modes || {}).upload ? "checked" : ""}> رفع ملف: يرفع الطالب ورقته المعبّأة (PDF أو صورة حتى 10 ميجا)</label>
               <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer"><input id="ce-mode-online" type="checkbox" class="accent-[#D4A359]" ${it && (it.modes || {}).online ? "checked" : ""} onchange="document.getElementById('ce-q-wrap').classList.toggle('hidden', !this.checked)"> إلكترونياً: يجيب على الأسئلة داخل المنصة</label>
               <div id="ce-q-wrap" class="${it && (it.modes || {}).online ? "" : "hidden"}">
                 <label class="block font-bold text-slate-700 mb-1">الأسئلة (سؤال في كل سطر):</label>
@@ -438,7 +440,8 @@ window.content = (function () {
     if (type === "sheet") {
       const paper = (document.getElementById("ce-mode-paper") || {}).checked;
       const online = (document.getElementById("ce-mode-online") || {}).checked;
-      if (!paper && !online) {
+      const uploadMode = (document.getElementById("ce-mode-upload") || {}).checked;
+      if (!paper && !online && !uploadMode) {
         alert("اختر طريقة تسليم واحدة على الأقل.");
         return;
       }
@@ -458,7 +461,7 @@ window.content = (function () {
       }
       const old = item.questions || [];
       item.sheetUrl = safeUrl(url);
-      item.modes = { paper: Boolean(paper), online: Boolean(online) };
+      item.modes = { paper: Boolean(paper), online: Boolean(online), upload: Boolean(uploadMode) };
       // نُبقي معرّفات الأسئلة الموجودة حتى لا تضيع إجابات سابقة
       item.questions = online
         ? lines.map((text, i) => ({ id: (old[i] && old[i].id) || "q" + (i + 1) + "_" + now.toString(36), text: cleanText(text, 300) }))
@@ -669,6 +672,9 @@ window.content = (function () {
               ? `<button onclick="content.markPaper('${it.id}','${s.id}',false)" class="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black"><i class="fa-solid fa-check ml-1"></i>استُلمت</button>`
               : `<button onclick="content.markPaper('${it.id}','${s.id}',true)" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-[#0B2533] hover:text-white text-slate-600 text-[10px] font-black">تعليم كمستلمة</button>`;
           }
+          if (e.fileUpload && e.fileUpload.path) {
+            actions += `<button onclick="content.openSubmission('${it.id}','${s.id}')" class="px-2 py-1 rounded-lg bg-sky-50 text-sky-800 border border-sky-200 text-[10px] font-black"><i class="fa-solid fa-file-arrow-down ml-1"></i>الملف</button>`;
+          }
           if ((it.modes || {}).online && e.submittedAt) {
             actions += `<button onclick="content.viewAnswers('${it.id}','${s.id}')" class="px-2 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-black">الإجابات</button>`;
           }
@@ -822,6 +828,17 @@ window.content = (function () {
             ${e.paperReceivedAt ? `استلم المشرف ورقتك ✓ (${escHtml(e.paperReceivedBy || "")})` : "التسليم الورقي: اطبع الورقة وعبّئها ثم سلّمها لمشرفك."}
           </div>`;
       }
+      if (modes.upload) {
+        const fu = e.fileUpload || null;
+        body += `
+          <div class="rounded-2xl border p-3 text-xs space-y-2 ${fu ? "bg-emerald-50 border-emerald-200" : "bg-white border-slate-200"}">
+            <div class="font-black text-slate-800"><i class="fa-solid fa-cloud-arrow-up text-[#169BA2] ml-1"></i> رفع الورقة المعبّأة${fu ? ' <span class="text-emerald-700">— رُفعت ✓</span>' : ""}</div>
+            ${fu ? `<div class="text-[11px] text-slate-600">${escHtml(fu.name || "ملف")} · ${escHtml(filesApi.sizeText(fu.size))} <button onclick="content.openSubmission('${it.id}','${state.currentUser.id}')" class="text-[#169BA2] font-black mr-1">عرض</button></div>` : ""}
+            <input id="sub-file" type="file" accept="application/pdf,image/*" class="w-full text-xs">
+            <div class="text-[10px] text-slate-400">PDF أو صورة (تُصغَّر الصورة تلقائياً)، حتى 10 ميجا.${fu ? " الرفع من جديد يستبدل الملف السابق." : ""}</div>
+            <button id="sub-btn" onclick="content.uploadSubmission('${it.id}')" class="w-full py-2 bg-[#0B2533] hover:bg-[#169BA2] text-white font-black rounded-xl transition"><i class="fa-solid fa-upload ml-1"></i> ${fu ? "استبدال الملف" : "رفع الملف"}</button>
+          </div>`;
+      }
       if (modes.online) {
         body += `
           <div class="space-y-3">
@@ -948,6 +965,69 @@ window.content = (function () {
     if (ok) {
       closeStudentItem();
       openStudentItem(itemId);
+    }
+  }
+
+  // ---------- رفع الطالب لورقته، وفتحها عند المشرف ----------
+  async function uploadSubmission(itemId) {
+    const u = me();
+    const it = findItem(itemId);
+    if (!it || it.type !== "sheet" || it.programId !== u.currentProgramId || !(it.modes || {}).upload) return;
+    const el = document.getElementById("sub-file");
+    let file = el && el.files ? el.files[0] : null;
+    if (!file) {
+      alert("اختر الملف أولاً.");
+      return;
+    }
+    const okType = file.type === "application/pdf" || /^image\/(jpeg|png|webp)$/.test(file.type) || /^image\//.test(file.type);
+    if (!okType) {
+      alert("الملف يجب أن يكون PDF أو صورة.");
+      return;
+    }
+    const btn = document.getElementById("sub-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin ml-1"></i> جارِ الرفع...';
+    }
+    try {
+      file = await filesApi.compressImage(file);
+      if (!/^(application\/pdf|image\/(jpeg|png|webp))$/.test(file.type)) {
+        throw new Error("صيغة الصورة غير مدعومة، جرّب صورة JPG");
+      }
+      if (file.size > 10 * 1024 * 1024) throw new Error("حجم الملف أكبر من 10 ميجا");
+      const ext = file.type === "application/pdf" ? "pdf" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+      const path = `submissions/${it.id}/${u.id}/f_${Date.now().toString(36)}.${ext}`;
+      await filesApi.upload("submission", path, file);
+      const ok = await saveEntry(u.id, it.id, {
+        fileUpload: { path, name: cleanText(file.name, 120), size: file.size, type: file.type, at: Date.now() },
+      });
+      if (ok) {
+        alert("تم رفع ملفك ✓");
+        closeStudentItem();
+      }
+    } catch (e) {
+      alert("تعذّر رفع الملف: " + (e && e.message ? e.message : "") );
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-upload ml-1"></i> رفع الملف';
+      }
+    }
+  }
+
+  async function openSubmission(itemId, studentId) {
+    const it = findItem(itemId);
+    const u = me();
+    if (!it) return;
+    if (!(canManage(it) || (u && u.id === studentId))) return;
+    const e = entry(studentId, itemId) || {};
+    if (!e.fileUpload || !e.fileUpload.path) return;
+    try {
+      const st = (db.users || []).find((x) => x.id === studentId);
+      const name = `${(st && st.name) || "طالب"} - ${it.title}.${e.fileUpload.path.split(".").pop()}`;
+      const url = await filesApi.signedUrl("submission", e.fileUpload.path, true, name);
+      window.open(url, "_blank", "noopener");
+    } catch (err) {
+      alert("تعذّر فتح الملف. حاول مجدداً.");
     }
   }
 
@@ -1101,6 +1181,8 @@ window.content = (function () {
     markRead,
     markOpened,
     markClipDone,
+    uploadSubmission,
+    openSubmission,
     runReadingReminders,
   };
 })();

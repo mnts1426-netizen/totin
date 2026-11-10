@@ -116,6 +116,7 @@ const NOTIF_TYPES = [
   { key: "profileEdit", label: "طلبات تعديل البيانات واعتمادها", to: "الإدارة / صاحب الطلب" },
   { key: "content", label: "درس أو تكليف أو قراءة جديدة", to: "طلاب البرنامج" },
   { key: "readingReminder", label: "تذكير القراءة القبلية", to: "طلاب البرنامج" },
+  { key: "reminder", label: "التذكيرات المجدولة", to: "من يحددهم المشرف أو المدير" },
   { key: "transfer", label: "نقل الطالب لبرنامج آخر", to: "الطالب" },
   { key: "registration", label: "قبول طلب التسجيل", to: "الطالب الجديد" },
   { key: "passwordReset", label: "تغيير كلمة المرور من الإدارة", to: "صاحب الحساب" },
@@ -138,6 +139,7 @@ const NOTIF_CATEGORY_TYPE = {
   "طلب اعتماد": "profileEdit",
   "الدروس والتكاليف": "content",
   "تذكير قراءة": "readingReminder",
+  "تذكير": "reminder",
   "نقل": "transfer",
   "تسجيل": "registration",
   "كلمة المرور": "passwordReset",
@@ -1273,6 +1275,13 @@ function handleLoginSubmit(programId) {
     return;
   }
 
+  // الطالب يدخل دائماً لبرنامجه هو (أياً كانت البطاقة التي ضغطها)؛
+  // نقله لبرنامج آخر من "النقل" عند الإدارة فقط
+  if (user.role === "student") {
+    const own = getListedPrograms().find((p) => p.id === user.currentProgramId);
+    if (own) programId = own.id; // برنامجه (وإن كان مغلقاً يُمنع بالأسفل)
+  }
+
   // منع تسجيل الدخول عبر برنامج مغلق
   const loginProg = db.programs.find((p) => p.id === programId);
   if (loginProg && loginProg.isClosed) {
@@ -1286,7 +1295,8 @@ function handleLoginSubmit(programId) {
     ? programId
     : firstActiveProgramId();
 
-  if (user.role === "student" && isProgramActive(programId)) {
+  // طالب بلا برنامج صالح (قديم): يُسجَّل في البرنامج الذي دخل منه
+  if (user.role === "student" && !isProgramActive(user.currentProgramId) && isProgramActive(programId)) {
     user.currentProgramId = programId;
   }
 
@@ -1506,6 +1516,15 @@ function navigateTo(viewName) {
         contentArea.innerHTML = window.views.renderExcusesView
           ? window.views.renderExcusesView()
           : window.views.renderHome(state.currentUser);
+        break;
+      case "reminders":
+        contentArea.innerHTML =
+          window.reminders && (state.currentUser.role === "admin" || state.currentUser.role === "supervisor")
+            ? window.reminders.renderView()
+            : window.views.renderHome(state.currentUser);
+        break;
+      case "books":
+        contentArea.innerHTML = window.books ? window.books.renderView() : window.views.renderHome(state.currentUser);
         break;
       case "reports":
         contentArea.innerHTML =
